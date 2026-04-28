@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/t3rmit3/assessor/internal/finding"
+	"github.com/t3rmit3/assessor/internal/profiles"
 	"github.com/t3rmit3/assessor/internal/sysfacts"
 )
 
@@ -36,6 +37,7 @@ func All() []Check {
 
 type Options struct {
 	Profile     string
+	ProfileDef  *profiles.Profile
 	Buckets     []string
 	IDs         []string
 	Parallelism int
@@ -111,7 +113,13 @@ func filter(in []Check, opts Options) []Check {
 		if len(idSet) > 0 && !idSet[m.ID] {
 			continue
 		}
-		if opts.Profile != "" && len(m.Profiles) > 0 {
+		// Profile filtering: if a structured ProfileDef was loaded, defer to it;
+		// otherwise fall back to inline metadata matching by Profile name.
+		if opts.ProfileDef != nil {
+			if !opts.ProfileDef.Match(m) {
+				continue
+			}
+		} else if opts.Profile != "" && len(m.Profiles) > 0 {
 			ok := false
 			for _, p := range m.Profiles {
 				if p == opts.Profile {

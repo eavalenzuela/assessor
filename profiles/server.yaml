@@ -15,3 +15,10 @@ include_buckets:
   - mac
   - forensic
   - webdb
+  - time
+exclude_ids:
+  # Information-only checks that should be reviewed by hand on a server,
+  # not gating on every run.
+  - mac.selinux.boolean_drift
+  - services.timers.inventory
+  - fs.suid.inventory

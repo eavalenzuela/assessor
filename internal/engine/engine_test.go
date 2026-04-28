@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/t3rmit3/assessor/internal/finding"
+	"github.com/t3rmit3/assessor/internal/profiles"
 	"github.com/t3rmit3/assessor/internal/sysfacts"
 )
 
@@ -35,6 +36,21 @@ func TestFilter(t *testing.T) {
 		{name: "id filter", opts: Options{IDs: []string{"a.1", "n.1"}}, want: []string{"a.1", "n.1"}},
 		{name: "profile filter excludes non-matching", opts: Options{Profile: "cis-l1"}, want: []string{"k.1", "n.1"}},
 		{name: "profile + bucket combined", opts: Options{Profile: "server", Buckets: []string{"auth"}}, want: []string{"a.1"}},
+		{
+			name: "ProfileDef include_buckets overrides inline metadata",
+			opts: Options{ProfileDef: &profiles.Profile{Name: "x", IncludeBuckets: []string{"auth", "kernel"}}},
+			want: []string{"a.1", "k.1"},
+		},
+		{
+			name: "ProfileDef exclude_ids removes a check",
+			opts: Options{ProfileDef: &profiles.Profile{Name: "x", ExcludeIDs: []string{"a.1"}}},
+			want: []string{"k.1", "n.1"},
+		},
+		{
+			name: "ProfileDef name fallback respects inline profile metadata",
+			opts: Options{ProfileDef: &profiles.Profile{Name: "cis-l1"}},
+			want: []string{"k.1", "n.1"}, // a.1 is server-only; n.1 has no profile = always-on
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

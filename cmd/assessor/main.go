@@ -13,6 +13,7 @@ import (
 	"github.com/t3rmit3/assessor/internal/cve"
 	"github.com/t3rmit3/assessor/internal/engine"
 	"github.com/t3rmit3/assessor/internal/finding"
+	"github.com/t3rmit3/assessor/internal/profiles"
 	jsonout "github.com/t3rmit3/assessor/internal/report/json"
 	"github.com/t3rmit3/assessor/internal/report/pdf"
 	"github.com/t3rmit3/assessor/internal/report/tty"
@@ -63,6 +64,7 @@ func runCmd() *cobra.Command {
 		snapDir     string
 		quietTTY    bool
 		skipRoot    bool
+		profileDir  string
 	)
 	cmd := &cobra.Command{
 		Use:   "run",
@@ -81,8 +83,13 @@ func runCmd() *cobra.Command {
 				pkgChecks.SetDB(db)
 			}
 			ctx := context.Background()
+			profileDef, err := profiles.Load(profileDir, profile)
+			if err != nil {
+				return err
+			}
 			report, err := engine.Run(ctx, engine.Options{
 				Profile:     profile,
+				ProfileDef:  profileDef,
 				Buckets:     buckets,
 				IDs:         ids,
 				Parallelism: parallel,
@@ -135,6 +142,7 @@ func runCmd() *cobra.Command {
 	cmd.Flags().StringVar(&snapDir, "snapshot-dir", baseline.DefaultDir, "snapshot directory")
 	cmd.Flags().BoolVar(&quietTTY, "quiet", false, "suppress TTY output")
 	cmd.Flags().BoolVar(&skipRoot, "skip-root-check", false, "permit non-root run (debug only)")
+	cmd.Flags().StringVar(&profileDir, "profile-dir", "profiles", "directory containing profile YAML files")
 	return cmd
 }
 
@@ -154,13 +162,19 @@ func listCmd() *cobra.Command {
 }
 
 func diffCmd() *cobra.Command {
-	var prevPath string
+	var (
+		prevPath  string
+		asJSON    bool
+		skipRoot  bool
+	)
 	cmd := &cobra.Command{
 		Use:   "diff",
 		Short: "Run checks now and diff against the latest snapshot",
 		RunE: func(c *cobra.Command, args []string) error {
-			if err := engine.RequireRoot(); err != nil {
-				return err
+			if !skipRoot {
+				if err := engine.RequireRoot(); err != nil {
+					return err
+				}
 			}
 			if prevPath == "" {
 				p, err := baseline.Latest("")
@@ -178,12 +192,18 @@ func diffCmd() *cobra.Command {
 				return err
 			}
 			d := baseline.Compare(prev, cur)
-			enc := json.NewEncoder(os.Stdout)
-			enc.SetIndent("", "  ")
-			return enc.Encode(d)
+			if asJSON {
+				enc := json.NewEncoder(os.Stdout)
+				enc.SetIndent("", "  ")
+				return enc.Encode(d)
+			}
+			baseline.RenderTTY(os.Stdout, prevPath, prev, cur, d)
+			return nil
 		},
 	}
 	cmd.Flags().StringVar(&prevPath, "previous", "", "path to previous snapshot (default: newest in /var/lib/assessor)")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "emit machine-readable JSON instead of TTY output")
+	cmd.Flags().BoolVar(&skipRoot, "skip-root-check", false, "permit non-root run (debug only)")
 	return cmd
 }
 

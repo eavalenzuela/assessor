@@ -1,0 +1,4 @@
+name: cis-l1
+description: CIS Level-1 mapped checks only (legacy inline-profile filter).
+# No include lists — fall back to inline `profiles: [cis-l1]` metadata
+# on individual checks. Add include_ids here to override.

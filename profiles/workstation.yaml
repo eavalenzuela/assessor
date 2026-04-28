@@ -1,0 +1,22 @@
+name: workstation
+description: Desktop / laptop — relax server-only checks (LUKS still on; no auditd).
+include_buckets:
+  - kernel
+  - auth
+  - ssh
+  - fs
+  - network
+  - packages
+  - crypto
+  - containers
+  - mac
+  - forensic
+  - time
+exclude_buckets:
+  - webdb
+exclude_ids:
+  - logging.auditd.running
+  - logging.auditd.rules_baseline
+  - logging.rsyslog.forwarding
+  - packages.auto_update.configured
+  - services.unwanted.enabled

@@ -83,11 +83,15 @@ func affects(v Vuln, p Package) bool {
 		if !strings.EqualFold(a.Package, p.Name) {
 			continue
 		}
+		eco := a.Ecosystem
+		if eco == "" {
+			eco = p.Ecosystem
+		}
 		if a.Fixed == "" {
 			return true
 		}
-		if compareVersions(p.Version, a.Fixed) < 0 {
-			if a.Introduced == "" || compareVersions(p.Version, a.Introduced) >= 0 {
+		if CompareForEcosystem(eco, p.Version, a.Fixed) < 0 {
+			if a.Introduced == "" || CompareForEcosystem(eco, p.Version, a.Introduced) >= 0 {
 				return true
 			}
 		}
