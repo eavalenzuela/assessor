@@ -1,0 +1,17 @@
+name: server
+description: Headless server profile — strict baseline.
+include_buckets:
+  - kernel
+  - auth
+  - ssh
+  - fs
+  - network
+  - services
+  - packages
+  - logging
+  - crypto
+  - containers
+  - cron
+  - mac
+  - forensic
+  - webdb
