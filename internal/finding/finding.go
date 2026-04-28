@@ -35,6 +35,10 @@ type Evidence struct {
 	Content string `json:"content"`
 	Line    int    `json:"line,omitempty"`
 	SHA256  string `json:"sha256,omitempty"`
+	// Tracked marks evidence whose content (line set) should be diffed in
+	// `assessor diff`. Use for inventory-shaped checks where a stable list
+	// is the signal — SUID files, listeners, timers, CVE IDs.
+	Tracked bool `json:"tracked,omitempty"`
 }
 
 type Remediation struct {

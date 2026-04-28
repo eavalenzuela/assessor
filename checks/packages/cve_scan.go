@@ -66,7 +66,7 @@ func (cveScanCheck) Run(ctx context.Context, facts sysfacts.Facts) finding.Findi
 		Status:  finding.StatusFail,
 		Message: fmt.Sprintf("%d CVE match(es) on %d packages", len(matches), countDistinctPkgs(matches)),
 		Evidence: []finding.Evidence{
-			evidence.Note("cve-match", strings.Join(lines, "\n")),
+			evidence.TrackedNote("cve-match", strings.Join(lines, "\n")),
 		},
 		Remediation: finding.Remediation{
 			Description: fmt.Sprintf("Update affected packages via %s.", facts.PackageManager),

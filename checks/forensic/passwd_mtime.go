@@ -116,7 +116,7 @@ func (bashHistorySecretsCheck) Run(ctx context.Context, _ sysfacts.Facts) findin
 		Evidence: []finding.Evidence{
 			// Don't echo matched lines — only the metadata. Reduces accidental disclosure
 			// in the report itself.
-			evidence.Note("shell history scan", strings.Join(hits, "\n")),
+			evidence.TrackedNote("shell history scan", strings.Join(hits, "\n")),
 		},
 		Remediation: finding.Remediation{
 			Description: "Truncate the affected histories and rotate any disclosed credentials.",

@@ -71,7 +71,7 @@ func (suidInventoryCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Fin
 		}
 	})
 	sort.Strings(entries)
-	ev := evidence.Note("walk(/bin /sbin /usr /etc /opt /var /home /root /tmp)", strings.Join(entries, "\n"))
+	ev := evidence.TrackedNote("walk(/bin /sbin /usr /etc /opt /var /home /root /tmp)", strings.Join(entries, "\n"))
 	return finding.Finding{
 		Status:   finding.StatusWarn,
 		Message:  fmt.Sprintf("%d SUID/SGID file(s) — review against baseline", len(entries)),

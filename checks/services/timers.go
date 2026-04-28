@@ -37,7 +37,7 @@ func (timersInventoryCheck) Run(ctx context.Context, facts sysfacts.Facts) findi
 			lines = append(lines, l)
 		}
 	}
-	ev := evidence.Note("systemctl list-timers", strings.Join(lines, "\n"))
+	ev := evidence.TrackedNote("systemctl list-timers", strings.Join(lines, "\n"))
 	return finding.Finding{
 		Status:   finding.StatusWarn,
 		Message:  "review timer list — snapshot with `assessor run --snapshot` to detect future additions",

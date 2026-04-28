@@ -17,6 +17,14 @@ func mkReport(states map[string]finding.Status) finding.Report {
 	return r
 }
 
+func mkFindingWithEvidence(id string, st finding.Status, evs ...finding.Evidence) finding.Finding {
+	return finding.Finding{
+		Meta:     finding.Metadata{ID: id},
+		Status:   st,
+		Evidence: evs,
+	}
+}
+
 func TestCompare(t *testing.T) {
 	prev := mkReport(map[string]finding.Status{
 		"a.fail":      finding.StatusFail,
@@ -56,5 +64,61 @@ func TestCompare(t *testing.T) {
 		if !statusChangeIDs[want] {
 			t.Errorf("missing status change for %s", want)
 		}
+	}
+}
+
+func TestEvidenceDiff(t *testing.T) {
+	tracked := func(src, content string) finding.Evidence {
+		return finding.Evidence{Kind: "note", Source: src, Content: content, Tracked: true}
+	}
+	untracked := func(src, content string) finding.Evidence {
+		return finding.Evidence{Kind: "note", Source: src, Content: content}
+	}
+
+	prev := finding.Report{Findings: []finding.Finding{
+		mkFindingWithEvidence("fs.suid", finding.StatusWarn,
+			tracked("walk", "/usr/bin/sudo\n/usr/bin/passwd")),
+		mkFindingWithEvidence("noisy", finding.StatusPass,
+			untracked("ps", "1234 systemd\n5678 cron")),
+	}}
+	cur := finding.Report{Findings: []finding.Finding{
+		mkFindingWithEvidence("fs.suid", finding.StatusWarn,
+			tracked("walk", "/usr/bin/sudo\n/tmp/sketch")),
+		mkFindingWithEvidence("noisy", finding.StatusPass,
+			untracked("ps", "9999 systemd\n8888 cron")),
+	}}
+	d := Compare(prev, cur)
+
+	if len(d.EvidenceChanges) != 1 {
+		t.Fatalf("got %d evidence changes, want 1 (untracked must be ignored)", len(d.EvidenceChanges))
+	}
+	ec := d.EvidenceChanges[0]
+	if ec.FindingID != "fs.suid" {
+		t.Errorf("FindingID = %q, want fs.suid", ec.FindingID)
+	}
+	if len(ec.Added) != 1 || ec.Added[0] != "/tmp/sketch" {
+		t.Errorf("Added = %v, want [/tmp/sketch]", ec.Added)
+	}
+	if len(ec.Removed) != 1 || ec.Removed[0] != "/usr/bin/passwd" {
+		t.Errorf("Removed = %v, want [/usr/bin/passwd]", ec.Removed)
+	}
+}
+
+func TestEvidenceDiff_NoChange(t *testing.T) {
+	tracked := func(src, content string) finding.Evidence {
+		return finding.Evidence{Kind: "note", Source: src, Content: content, Tracked: true}
+	}
+	prev := finding.Report{Findings: []finding.Finding{
+		mkFindingWithEvidence("inv", finding.StatusWarn,
+			tracked("walk", "a\nb\nc")),
+	}}
+	// Same set, different order, with whitespace noise — should not produce a diff.
+	cur := finding.Report{Findings: []finding.Finding{
+		mkFindingWithEvidence("inv", finding.StatusWarn,
+			tracked("walk", " c \nb\n  a")),
+	}}
+	d := Compare(prev, cur)
+	if len(d.EvidenceChanges) != 0 {
+		t.Errorf("got %d evidence changes, want 0; %+v", len(d.EvidenceChanges), d.EvidenceChanges)
 	}
 }

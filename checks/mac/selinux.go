@@ -41,7 +41,7 @@ func (selinuxBooleansCheck) Run(ctx context.Context, facts sysfacts.Facts) findi
 			on = append(on, line)
 		}
 	}
-	ev := evidence.Note("getsebool -a (on)", strings.Join(on, "\n"))
+	ev := evidence.TrackedNote("getsebool -a (on)", strings.Join(on, "\n"))
 	return finding.Finding{
 		Status:   finding.StatusWarn,
 		Message:  "SELinux booleans set to 'on' — review and snapshot for diff mode",

@@ -58,3 +58,10 @@ func Command(name string, args ...string) (finding.Evidence, error) {
 func Note(source, content string) finding.Evidence {
 	return finding.Evidence{Kind: "note", Source: source, Content: content}
 }
+
+// TrackedNote is a Note marked for line-level diff in `assessor diff`.
+// Use for inventory-shaped output (sorted lists of files, sockets, CVEs)
+// where the *delta* between runs is the meaningful signal.
+func TrackedNote(source, content string) finding.Evidence {
+	return finding.Evidence{Kind: "note", Source: source, Content: content, Tracked: true}
+}

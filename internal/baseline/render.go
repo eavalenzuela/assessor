@@ -52,7 +52,7 @@ func RenderTTY(w io.Writer, prevPath string, prev, cur finding.Report, d Diff) {
 	fmt.Fprintf(w, "  cur:  %s    %d findings\n", cur.StartedAt.Format("2006-01-02 15:04 MST"), len(cur.Findings))
 	fmt.Fprintf(w, "  delta risk: %s\n\n", riskDelta(prev, cur))
 
-	if len(d.NewFails) == 0 && len(d.ResolvedFails) == 0 && len(d.StatusChanges) == 0 {
+	if len(d.NewFails) == 0 && len(d.ResolvedFails) == 0 && len(d.StatusChanges) == 0 && len(d.EvidenceChanges) == 0 {
 		fmt.Fprintln(w, c(green, "  no changes"))
 		return
 	}
@@ -98,8 +98,52 @@ func RenderTTY(w io.Writer, prevPath string, prev, cur finding.Report, d Diff) {
 					c(dim, "->"),
 					string(sc.To))
 			}
+			fmt.Fprintln(w)
 		}
 	}
+	if len(d.EvidenceChanges) > 0 {
+		// Group by finding for tidier output.
+		byFinding := map[string][]EvidenceChange{}
+		var ids []string
+		for _, ec := range d.EvidenceChanges {
+			if _, seen := byFinding[ec.FindingID]; !seen {
+				ids = append(ids, ec.FindingID)
+			}
+			byFinding[ec.FindingID] = append(byFinding[ec.FindingID], ec)
+		}
+		sort.Strings(ids)
+		fmt.Fprintf(w, "%s\n", c(bold, fmt.Sprintf("Evidence drift (%d finding%s)", len(ids), pluralS(len(ids)))))
+		const maxPerSource = 12
+		for _, id := range ids {
+			fmt.Fprintf(w, "  %s\n", c(cyan, id))
+			for _, ec := range byFinding[id] {
+				fmt.Fprintf(w, "    %s %s\n", c(dim, "src:"), ec.Source)
+				renderLines(w, ec.Added, c(green, "+"), maxPerSource)
+				renderLines(w, ec.Removed, c(red, "-"), maxPerSource)
+			}
+		}
+	}
+}
+
+func renderLines(w io.Writer, lines []string, marker string, maxLines int) {
+	sort.Strings(lines)
+	shown := lines
+	if len(shown) > maxLines {
+		shown = lines[:maxLines]
+	}
+	for _, l := range shown {
+		fmt.Fprintf(w, "      %s %s\n", marker, l)
+	}
+	if len(lines) > maxLines {
+		fmt.Fprintf(w, "      %s ...[%d more]\n", c(dim, " "), len(lines)-maxLines)
+	}
+}
+
+func pluralS(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }
 
 func sevBadge(s finding.Severity) string {

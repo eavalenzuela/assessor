@@ -53,7 +53,7 @@ func (listeningCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Finding
 	}
 	sort.Strings(external)
 	sort.Strings(internal)
-	ev := evidence.Note("/proc/net/{tcp,tcp6,udp,udp6}",
+	ev := evidence.TrackedNote("/proc/net/{tcp,tcp6,udp,udp6}",
 		"external:\n  "+strings.Join(external, "\n  ")+
 			"\nloopback-only:\n  "+strings.Join(internal, "\n  "))
 
