@@ -31,6 +31,7 @@ import (
 	pkgChecks "github.com/t3rmit3/assessor/checks/packages"
 	_ "github.com/t3rmit3/assessor/checks/services"
 	_ "github.com/t3rmit3/assessor/checks/ssh"
+	_ "github.com/t3rmit3/assessor/checks/time"
 	_ "github.com/t3rmit3/assessor/checks/webdb"
 )
 
