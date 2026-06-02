@@ -38,7 +38,7 @@ func (cronPermsCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Finding
 			if err != nil {
 				return nil
 			}
-			if st.Mode().Perm()&0o002 != 0 {
+			if isWorldWritable(st.Mode().Perm()) {
 				bad = append(bad, fmt.Sprintf("%s (%s)", p, st.Mode().Perm()))
 				evs = append(evs, evidence.Note(p, st.Mode().String()))
 			}
@@ -57,6 +57,12 @@ func (cronPermsCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Finding
 			Commands:    []string{"chmod o-w /etc/cron.d/*", "chown root:root /etc/cron.d/*"},
 		},
 	}
+}
+
+// isWorldWritable reports whether a permission set grants write to "other"
+// (the 0o002 bit). Group-write (0o020) is intentionally not flagged here.
+func isWorldWritable(perm os.FileMode) bool {
+	return perm&0o002 != 0
 }
 
 func init() { engine.Register(cronPermsCheck{}) }
