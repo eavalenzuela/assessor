@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -89,19 +90,7 @@ func (bashHistorySecretsCheck) Run(ctx context.Context, _ sysfacts.Facts) findin
 		if err != nil {
 			continue
 		}
-		s := bufio.NewScanner(f)
-		s.Buffer(make([]byte, 0, 64*1024), 1<<20)
-		lineNo := 0
-		for s.Scan() {
-			lineNo++
-			line := s.Text()
-			for _, re := range secretPatterns {
-				if re.MatchString(line) {
-					hits = append(hits, fmt.Sprintf("%s:%d (matches %s)", p, lineNo, re.String()))
-					break
-				}
-			}
-		}
+		hits = append(hits, scanHistorySecrets(f, p)...)
 		f.Close()
 	}
 	if len(hits) == 0 {
@@ -124,6 +113,28 @@ func (bashHistorySecretsCheck) Run(ctx context.Context, _ sysfacts.Facts) findin
 	}
 }
 
+// scanHistorySecrets scans a shell-history stream line-by-line against
+// secretPatterns and returns "path:line (matches <regex>)" for each hit. Only
+// metadata is returned — never the matched line — to avoid disclosing the
+// secret in the report itself. `path` labels the output.
+func scanHistorySecrets(r io.Reader, path string) []string {
+	var hits []string
+	s := bufio.NewScanner(r)
+	s.Buffer(make([]byte, 0, 64*1024), 1<<20)
+	lineNo := 0
+	for s.Scan() {
+		lineNo++
+		line := s.Text()
+		for _, re := range secretPatterns {
+			if re.MatchString(line) {
+				hits = append(hits, fmt.Sprintf("%s:%d (matches %s)", path, lineNo, re.String()))
+				break
+			}
+		}
+	}
+	return hits
+}
+
 func historyHomes() ([]string, error) {
 	f, err := os.Open("/etc/passwd")
 	if err != nil {
@@ -131,7 +142,20 @@ func historyHomes() ([]string, error) {
 	}
 	defer f.Close()
 	var out []string
-	s := bufio.NewScanner(f)
+	for _, home := range parseHistoryHomes(f) {
+		if st, err := os.Stat(home); err == nil && st.IsDir() {
+			out = append(out, home)
+		}
+	}
+	return out, nil
+}
+
+// parseHistoryHomes returns home directories of interactive accounts from a
+// passwd stream, excluding nologin/false shells and the empty, "/", and "/root"
+// homes (root is scanned separately). It does not stat the dirs.
+func parseHistoryHomes(r io.Reader) []string {
+	var out []string
+	s := bufio.NewScanner(r)
 	for s.Scan() {
 		fields := strings.Split(s.Text(), ":")
 		if len(fields) < 7 {
@@ -145,11 +169,9 @@ func historyHomes() ([]string, error) {
 		if home == "" || home == "/" || home == "/root" {
 			continue
 		}
-		if st, err := os.Stat(home); err == nil && st.IsDir() {
-			out = append(out, home)
-		}
+		out = append(out, home)
 	}
-	return out, nil
+	return out
 }
 
 func init() {

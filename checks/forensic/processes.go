@@ -44,19 +44,13 @@ func (hiddenPidsCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Findin
 	if err != nil {
 		return finding.Finding{Status: finding.StatusError, Err: err.Error()}
 	}
-	psPids := map[int]bool{}
-	for _, f := range strings.Fields(string(out)) {
-		if n, err := strconv.Atoi(f); err == nil {
-			psPids[n] = true
-		}
-	}
+	psPids := parsePSPids(string(out))
 	var hidden []int
-	for pid := range procPids {
-		if !psPids[pid] {
-			// PIDs can come and go between the two reads — skip our own pid and require a re-check.
-			if _, err := os.Stat(fmt.Sprintf("/proc/%d", pid)); err == nil {
-				hidden = append(hidden, pid)
-			}
+	for _, pid := range pidsOnlyIn(procPids, psPids) {
+		// PIDs can come and go between the two reads — re-check the PID still
+		// exists to filter out short-lived processes that exited mid-scan.
+		if _, err := os.Stat(fmt.Sprintf("/proc/%d", pid)); err == nil {
+			hidden = append(hidden, pid)
 		}
 	}
 	if len(hidden) == 0 {
@@ -122,6 +116,30 @@ func (unsignedModulesCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.F
 			Description: "Rebuild affected DKMS modules with signing, or remove if not required.",
 		},
 	}
+}
+
+// parsePSPids parses whitespace-separated PIDs (from `ps -eo pid`) into a set,
+// skipping non-numeric fields.
+func parsePSPids(out string) map[int]bool {
+	m := map[int]bool{}
+	for _, f := range strings.Fields(out) {
+		if n, err := strconv.Atoi(f); err == nil {
+			m[n] = true
+		}
+	}
+	return m
+}
+
+// pidsOnlyIn returns the PIDs present in `a` but not `b` — i.e. PIDs in /proc
+// that ps did not report, the candidate set for process-hiding rootkits.
+func pidsOnlyIn(a, b map[int]bool) []int {
+	var out []int
+	for pid := range a {
+		if !b[pid] {
+			out = append(out, pid)
+		}
+	}
+	return out
 }
 
 func init() {
