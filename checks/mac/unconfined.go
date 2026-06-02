@@ -40,12 +40,7 @@ func (unconfinedCheck) Run(ctx context.Context, facts sysfacts.Facts) finding.Fi
 		if err != nil {
 			return finding.Finding{Status: finding.StatusError, Err: err.Error()}
 		}
-		var unconfined []string
-		for _, line := range strings.Split(string(out), "\n") {
-			if strings.Contains(line, "unconfined_t") {
-				unconfined = append(unconfined, line)
-			}
-		}
+		unconfined := unconfinedSELinux(string(out))
 		ev := evidence.Note("ps -eZ | grep unconfined_t", strings.Join(unconfined, "\n"))
 		if len(unconfined) > 0 {
 			return finding.Finding{
@@ -57,6 +52,18 @@ func (unconfinedCheck) Run(ctx context.Context, facts sysfacts.Facts) finding.Fi
 		return finding.Finding{Status: finding.StatusPass, Message: "no unconfined_t processes"}
 	}
 	return finding.Finding{Status: finding.StatusSkipped, Message: "no MAC subsystem"}
+}
+
+// unconfinedSELinux returns the `ps -eZ` lines whose security context is the
+// unconfined_t domain (processes running outside SELinux confinement).
+func unconfinedSELinux(psOut string) []string {
+	var unconfined []string
+	for _, line := range strings.Split(psOut, "\n") {
+		if strings.Contains(line, "unconfined_t") {
+			unconfined = append(unconfined, line)
+		}
+	}
+	return unconfined
 }
 
 func init() { engine.Register(unconfinedCheck{}) }

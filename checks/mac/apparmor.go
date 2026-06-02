@@ -34,14 +34,7 @@ func (apparmorComplainCheck) Run(ctx context.Context, facts sysfacts.Facts) find
 	if err != nil {
 		return finding.Finding{Status: finding.StatusError, Err: err.Error()}
 	}
-	var complain int
-	for _, line := range strings.Split(string(out), "\n") {
-		l := strings.TrimSpace(line)
-		// match "N profiles are in complain mode."
-		if strings.Contains(l, "profiles are in complain mode") {
-			fmt.Sscanf(l, "%d profiles are in complain mode", &complain)
-		}
-	}
+	complain := countComplainProfiles(string(out))
 	ev := evidence.Note("aa-status", string(out))
 	if complain == 0 {
 		return finding.Finding{Status: finding.StatusPass, Message: "no profiles in complain mode", Evidence: []finding.Evidence{ev}}
@@ -54,6 +47,19 @@ func (apparmorComplainCheck) Run(ctx context.Context, facts sysfacts.Facts) find
 			Description: "Move profiles to enforce: `aa-enforce /etc/apparmor.d/<profile>`",
 		},
 	}
+}
+
+// countComplainProfiles parses `aa-status` output for the "N profiles are in
+// complain mode" line and returns N (0 if absent).
+func countComplainProfiles(out string) int {
+	var complain int
+	for _, line := range strings.Split(out, "\n") {
+		l := strings.TrimSpace(line)
+		if strings.Contains(l, "profiles are in complain mode") {
+			fmt.Sscanf(l, "%d profiles are in complain mode", &complain)
+		}
+	}
+	return complain
 }
 
 func init() { engine.Register(apparmorComplainCheck{}) }

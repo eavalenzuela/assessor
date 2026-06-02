@@ -35,18 +35,24 @@ func (selinuxBooleansCheck) Run(ctx context.Context, facts sysfacts.Facts) findi
 		return finding.Finding{Status: finding.StatusError, Err: err.Error()}
 	}
 	// We can't compute drift without policy defaults; just snapshot all -> on as a baseline.
-	var on []string
-	for _, line := range strings.Split(string(out), "\n") {
-		if strings.HasSuffix(strings.TrimSpace(line), "on") {
-			on = append(on, line)
-		}
-	}
+	on := selinuxBoolsOn(string(out))
 	ev := evidence.TrackedNote("getsebool -a (on)", strings.Join(on, "\n"))
 	return finding.Finding{
 		Status:   finding.StatusWarn,
 		Message:  "SELinux booleans set to 'on' — review and snapshot for diff mode",
 		Evidence: []finding.Evidence{ev},
 	}
+}
+
+// selinuxBoolsOn returns the `getsebool -a` lines whose value is "on".
+func selinuxBoolsOn(out string) []string {
+	var on []string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasSuffix(strings.TrimSpace(line), "on") {
+			on = append(on, line)
+		}
+	}
+	return on
 }
 
 func init() { engine.Register(selinuxBooleansCheck{}) }
