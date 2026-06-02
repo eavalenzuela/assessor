@@ -45,12 +45,7 @@ func (auditdRulesCheck) Run(ctx context.Context, facts sysfacts.Facts) finding.F
 		return finding.Finding{Status: finding.StatusError, Err: err.Error()}
 	}
 	rules := string(out)
-	var missing []string
-	for _, want := range auditExpect {
-		if !strings.Contains(rules, want) {
-			missing = append(missing, want)
-		}
-	}
+	missing := missingAuditRules(rules)
 	ev := evidence.Note("auditctl -l", rules)
 	if len(missing) == 0 {
 		return finding.Finding{Status: finding.StatusPass, Message: "all baselined audit rules present", Evidence: []finding.Evidence{ev}}
@@ -82,10 +77,7 @@ func (rsyslogForwardCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Fi
 	if contents == "" {
 		return finding.Finding{Status: finding.StatusSkipped, Message: "no rsyslog/syslog-ng configs found"}
 	}
-	// Look for forwarding action: lines like `*.* @@host:port` or `*.* @host:port`
-	// or syslog-ng `destination(...) network(...)`.
-	if strings.Contains(contents, "@@") || strings.Contains(contents, "@1") || strings.Contains(contents, "@2") ||
-		strings.Contains(contents, "tcp(") || strings.Contains(contents, "syslog(") {
+	if hasRemoteForwarding(contents) {
 		return finding.Finding{Status: finding.StatusPass, Message: "remote log forwarding detected"}
 	}
 	return finding.Finding{
@@ -95,6 +87,27 @@ func (rsyslogForwardCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Fi
 			Description: "Add `*.* @@logserver:514` (TCP) to rsyslog or a network destination to syslog-ng.",
 		},
 	}
+}
+
+// missingAuditRules returns the auditExpect substrings absent from `auditctl -l`
+// output.
+func missingAuditRules(rules string) []string {
+	var missing []string
+	for _, want := range auditExpect {
+		if !strings.Contains(rules, want) {
+			missing = append(missing, want)
+		}
+	}
+	return missing
+}
+
+// hasRemoteForwarding reports whether concatenated rsyslog/syslog-ng config
+// contains a remote-forwarding directive: rsyslog `@@host`/`@host` (the `@1`/
+// `@2` prefixes catch IP literals) or a syslog-ng tcp()/syslog() destination.
+func hasRemoteForwarding(contents string) bool {
+	return strings.Contains(contents, "@@") ||
+		strings.Contains(contents, "@1") || strings.Contains(contents, "@2") ||
+		strings.Contains(contents, "tcp(") || strings.Contains(contents, "syslog(")
 }
 
 func concatConfigsLogging(paths []string) string {

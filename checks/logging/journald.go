@@ -3,6 +3,7 @@ package logging
 import (
 	"bufio"
 	"context"
+	"io"
 	"os"
 	"strings"
 
@@ -58,19 +59,29 @@ func journaldKey(key string) string {
 			continue
 		}
 		defer f.Close()
-		s := bufio.NewScanner(f)
-		for s.Scan() {
-			line := strings.TrimSpace(s.Text())
-			if strings.HasPrefix(line, "#") || line == "" {
-				continue
-			}
-			k, v, ok := strings.Cut(line, "=")
-			if !ok {
-				continue
-			}
-			if strings.EqualFold(strings.TrimSpace(k), key) {
-				return strings.ToLower(strings.TrimSpace(v))
-			}
+		if v := parseJournaldKey(f, key); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// parseJournaldKey returns the value of the given journald.conf key
+// (case-insensitive key, value lower-cased), or "" if absent. Blanks and
+// #-comments are skipped.
+func parseJournaldKey(r io.Reader, key string) string {
+	s := bufio.NewScanner(r)
+	for s.Scan() {
+		line := strings.TrimSpace(s.Text())
+		if strings.HasPrefix(line, "#") || line == "" {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(k), key) {
+			return strings.ToLower(strings.TrimSpace(v))
 		}
 	}
 	return ""
