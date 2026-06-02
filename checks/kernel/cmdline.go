@@ -35,12 +35,7 @@ func (cmdlineCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Finding {
 		return finding.Finding{Status: finding.StatusError, Err: err.Error()}
 	}
 	cmdline := strings.TrimSpace(string(b))
-	var missing []string
-	for _, f := range wantedCmdlineFlags {
-		if !strings.Contains(cmdline, f) {
-			missing = append(missing, f)
-		}
-	}
+	missing := missingCmdlineFlags(cmdline)
 	ev := evidence.Note("/proc/cmdline", cmdline)
 	if len(missing) == 0 {
 		return finding.Finding{Status: finding.StatusPass, Message: "all hardening flags present", Evidence: []finding.Evidence{ev}}
@@ -86,6 +81,18 @@ func (modulesSigCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Findin
 			Description: "Boot with module.sig_enforce=1 (requires a kernel built with module signing).",
 		},
 	}
+}
+
+// missingCmdlineFlags returns the wantedCmdlineFlags absent from the given
+// kernel command line (substring match, as the flags are self-delimiting).
+func missingCmdlineFlags(cmdline string) []string {
+	var missing []string
+	for _, f := range wantedCmdlineFlags {
+		if !strings.Contains(cmdline, f) {
+			missing = append(missing, f)
+		}
+	}
+	return missing
 }
 
 func init() {

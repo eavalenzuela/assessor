@@ -31,8 +31,7 @@ func (lockdownCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Finding 
 	}
 	val := strings.TrimSpace(string(b))
 	ev := evidence.Note(path, val)
-	// The active mode is wrapped in [brackets].
-	if strings.Contains(val, "[none]") {
+	if isLockdownNone(val) {
 		return finding.Finding{
 			Status:   finding.StatusWarn,
 			Message:  "lockdown=none",
@@ -43,6 +42,13 @@ func (lockdownCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Finding 
 		}
 	}
 	return finding.Finding{Status: finding.StatusPass, Message: "lockdown active: " + val, Evidence: []finding.Evidence{ev}}
+}
+
+// isLockdownNone reports whether the lockdown sysfs value indicates no lockdown.
+// The file lists all modes with the active one in [brackets], e.g.
+// "[none] integrity confidentiality".
+func isLockdownNone(val string) bool {
+	return strings.Contains(val, "[none]")
 }
 
 func init() { engine.Register(lockdownCheck{}) }

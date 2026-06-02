@@ -35,15 +35,7 @@ func (dmesgErrorsCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Findi
 		// dmesg may need root or fail on systems with kernel.dmesg_restrict=1 — that's expected.
 		return finding.Finding{Status: finding.StatusUnverified, Message: "dmesg unavailable: " + err.Error()}
 	}
-	var hits []string
-	for _, line := range strings.Split(string(out), "\n") {
-		for _, pat := range dmesgPatterns {
-			if strings.Contains(line, pat) {
-				hits = append(hits, line)
-				break
-			}
-		}
-	}
+	hits := dmesgHits(string(out))
 	ev := evidence.Note("dmesg -l err+", strings.Join(hits, "\n"))
 	if len(hits) == 0 {
 		return finding.Finding{Status: finding.StatusPass, Message: "no recent kernel errors"}
@@ -53,6 +45,21 @@ func (dmesgErrorsCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Findi
 		Message:  "kernel reporting errors — review",
 		Evidence: []finding.Evidence{ev},
 	}
+}
+
+// dmesgHits returns the lines of kernel-log output that match any
+// dmesgPatterns entry (OOM kills, MCE/hardware errors, GPF, call traces).
+func dmesgHits(out string) []string {
+	var hits []string
+	for _, line := range strings.Split(out, "\n") {
+		for _, pat := range dmesgPatterns {
+			if strings.Contains(line, pat) {
+				hits = append(hits, line)
+				break
+			}
+		}
+	}
+	return hits
 }
 
 func init() { engine.Register(dmesgErrorsCheck{}) }

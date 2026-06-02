@@ -47,26 +47,25 @@ var sysctlBaseline = map[string]string{
 }
 
 func (sysctlCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Finding {
-	var bad []string
-	var evs []finding.Evidence
-	for key, want := range sysctlBaseline {
+	got := map[string]string{}
+	for key := range sysctlBaseline {
 		path := filepath.Join("/proc/sys", strings.ReplaceAll(key, ".", "/"))
 		b, err := os.ReadFile(path)
 		if err != nil {
-			continue
+			continue // sysctl absent on this kernel — skip, don't flag
 		}
-		got := strings.TrimSpace(string(b))
-		if got != want {
-			bad = append(bad, fmt.Sprintf("%s=%s (want %s)", key, got, want))
-			evs = append(evs, evidence.Note(path, got))
-		}
+		got[key] = strings.TrimSpace(string(b))
 	}
+	bad := evaluateSysctl(got)
 	if len(bad) == 0 {
 		return finding.Finding{Status: finding.StatusPass, Message: "all baselined sysctls match"}
 	}
+	var evs []finding.Evidence
 	cmds := []string{}
 	for _, line := range bad {
 		k := strings.SplitN(line, "=", 2)[0]
+		path := filepath.Join("/proc/sys", strings.ReplaceAll(k, ".", "/"))
+		evs = append(evs, evidence.Note(path, got[k]))
 		cmds = append(cmds, fmt.Sprintf("echo '%s = %s' >> /etc/sysctl.d/99-assessor.conf", k, sysctlBaseline[k]))
 	}
 	cmds = append(cmds, "sysctl --system")
@@ -79,6 +78,23 @@ func (sysctlCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Finding {
 			Commands:    cmds,
 		},
 	}
+}
+
+// evaluateSysctl compares observed sysctl values against sysctlBaseline and
+// returns a "key=got (want X)" line for each drift. Keys absent from `got`
+// (not exposed by this kernel) are skipped rather than flagged.
+func evaluateSysctl(got map[string]string) []string {
+	var bad []string
+	for key, want := range sysctlBaseline {
+		v, ok := got[key]
+		if !ok {
+			continue
+		}
+		if v != want {
+			bad = append(bad, fmt.Sprintf("%s=%s (want %s)", key, v, want))
+		}
+	}
+	return bad
 }
 
 func init() { engine.Register(sysctlCheck{}) }

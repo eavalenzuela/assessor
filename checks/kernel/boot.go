@@ -116,19 +116,7 @@ func (modulesBlocklistCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.
 	if err != nil {
 		return finding.Finding{Status: finding.StatusError, Err: err.Error()}
 	}
-	loaded := map[string]bool{}
-	for _, line := range strings.Split(string(out), "\n")[1:] {
-		fields := strings.Fields(line)
-		if len(fields) > 0 {
-			loaded[fields[0]] = true
-		}
-	}
-	bad := []string{}
-	for _, m := range []string{"cramfs", "freevxfs", "hfs", "hfsplus", "jffs2", "squashfs", "udf", "usb-storage", "dccp", "sctp", "tipc", "rds"} {
-		if loaded[m] {
-			bad = append(bad, m)
-		}
-	}
+	bad := blocklistedLoaded(string(out))
 	if len(bad) == 0 {
 		return finding.Finding{Status: finding.StatusPass, Message: "no legacy modules loaded"}
 	}
@@ -142,6 +130,33 @@ func (modulesBlocklistCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.
 			Description: "Add `install <mod> /bin/true` lines to /etc/modprobe.d/blocklist.conf.",
 		},
 	}
+}
+
+// blocklistedModules is the set of legacy/rarely-needed kernel modules that
+// should not be loaded on a hardened host (CIS 1.1.x filesystem/network mods).
+var blocklistedModules = []string{
+	"cramfs", "freevxfs", "hfs", "hfsplus", "jffs2", "squashfs", "udf",
+	"usb-storage", "dccp", "sctp", "tipc", "rds",
+}
+
+// blocklistedLoaded parses `lsmod` output (whose first line is a header) and
+// returns which blocklistedModules are currently loaded.
+func blocklistedLoaded(lsmodOut string) []string {
+	loaded := map[string]bool{}
+	lines := strings.Split(lsmodOut, "\n")
+	for _, line := range lines[1:] { // skip "Module  Size  Used by" header
+		fields := strings.Fields(line)
+		if len(fields) > 0 {
+			loaded[fields[0]] = true
+		}
+	}
+	bad := []string{}
+	for _, m := range blocklistedModules {
+		if loaded[m] {
+			bad = append(bad, m)
+		}
+	}
+	return bad
 }
 
 func init() {
