@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -33,21 +34,7 @@ func (uidZeroCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Finding {
 	}
 	defer f.Close()
 
-	var roots []string
-	var evs []finding.Evidence
-	s := bufio.NewScanner(f)
-	lineNo := 0
-	for s.Scan() {
-		lineNo++
-		fields := strings.Split(s.Text(), ":")
-		if len(fields) < 3 {
-			continue
-		}
-		if fields[2] == "0" {
-			roots = append(roots, fields[0])
-			evs = append(evs, evidence.FileLine(path, lineNo, s.Text()))
-		}
-	}
+	roots, evs := scanUIDZero(f, path)
 
 	if len(roots) <= 1 {
 		return finding.Finding{Status: finding.StatusPass, Message: fmt.Sprintf("UID 0: %v", roots)}
@@ -81,21 +68,7 @@ func (emptyPasswordCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Fin
 		return finding.Finding{Status: finding.StatusError, Err: err.Error()}
 	}
 	defer f.Close()
-	var bad []string
-	var evs []finding.Evidence
-	s := bufio.NewScanner(f)
-	lineNo := 0
-	for s.Scan() {
-		lineNo++
-		fields := strings.Split(s.Text(), ":")
-		if len(fields) < 2 {
-			continue
-		}
-		if fields[1] == "" {
-			bad = append(bad, fields[0])
-			evs = append(evs, evidence.FileLine(path, lineNo, fields[0]+":<empty>"))
-		}
-	}
+	bad, evs := scanEmptyPasswords(f, path)
 	if len(bad) == 0 {
 		return finding.Finding{Status: finding.StatusPass, Message: "no empty-password accounts"}
 	}
@@ -108,6 +81,45 @@ func (emptyPasswordCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Fin
 			Commands:    []string{"passwd -l <user>"},
 		},
 	}
+}
+
+// scanUIDZero returns every account in a passwd stream whose UID field is "0",
+// with file-line evidence. More than one such account means a hidden root-
+// equivalent login. `path` only labels the evidence.
+func scanUIDZero(r io.Reader, path string) (roots []string, evs []finding.Evidence) {
+	s := bufio.NewScanner(r)
+	lineNo := 0
+	for s.Scan() {
+		lineNo++
+		fields := strings.Split(s.Text(), ":")
+		if len(fields) < 3 {
+			continue
+		}
+		if fields[2] == "0" {
+			roots = append(roots, fields[0])
+			evs = append(evs, evidence.FileLine(path, lineNo, s.Text()))
+		}
+	}
+	return roots, evs
+}
+
+// scanEmptyPasswords returns accounts in a shadow stream whose password hash
+// field is empty (passwordless login). `path` only labels the evidence.
+func scanEmptyPasswords(r io.Reader, path string) (bad []string, evs []finding.Evidence) {
+	s := bufio.NewScanner(r)
+	lineNo := 0
+	for s.Scan() {
+		lineNo++
+		fields := strings.Split(s.Text(), ":")
+		if len(fields) < 2 {
+			continue
+		}
+		if fields[1] == "" {
+			bad = append(bad, fields[0])
+			evs = append(evs, evidence.FileLine(path, lineNo, fields[0]+":<empty>"))
+		}
+	}
+	return bad, evs
 }
 
 func init() {

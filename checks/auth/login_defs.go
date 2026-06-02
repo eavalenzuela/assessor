@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -35,54 +36,8 @@ func (loginDefsCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Finding
 		return finding.Finding{Status: finding.StatusError, Err: err.Error()}
 	}
 	defer f.Close()
-	got := map[string]string{}
-	s := bufio.NewScanner(f)
-	for s.Scan() {
-		line := strings.TrimSpace(s.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) >= 2 {
-			got[strings.ToUpper(fields[0])] = fields[1]
-		}
-	}
-
-	type rule struct {
-		key string
-		max int
-		min int
-	}
-	intRules := []rule{
-		{"PASS_MAX_DAYS", 365, 0},
-		{"PASS_MIN_DAYS", 30, 1},
-		{"PASS_WARN_AGE", 30, 7},
-	}
-	var bad []string
-	for _, r := range intRules {
-		v, ok := got[r.key]
-		if !ok {
-			bad = append(bad, r.key+" unset")
-			continue
-		}
-		n, err := strconv.Atoi(v)
-		if err != nil {
-			bad = append(bad, fmt.Sprintf("%s=%s (not numeric)", r.key, v))
-			continue
-		}
-		if r.max > 0 && n > r.max {
-			bad = append(bad, fmt.Sprintf("%s=%d (>%d)", r.key, n, r.max))
-		}
-		if r.min > 0 && n < r.min {
-			bad = append(bad, fmt.Sprintf("%s=%d (<%d)", r.key, n, r.min))
-		}
-	}
-	if v, ok := got["UMASK"]; ok && v != "027" && v != "077" {
-		bad = append(bad, fmt.Sprintf("UMASK=%s (want 027 or 077)", v))
-	}
-	if v, ok := got["ENCRYPT_METHOD"]; !ok || (v != "SHA512" && v != "YESCRYPT") {
-		bad = append(bad, fmt.Sprintf("ENCRYPT_METHOD=%q (want SHA512 or YESCRYPT)", v))
-	}
+	got := parseLoginDefs(f)
+	bad := evaluateLoginDefs(got)
 	if len(bad) == 0 {
 		return finding.Finding{Status: finding.StatusPass, Message: "login.defs policy OK"}
 	}
@@ -125,20 +80,10 @@ func (sudoersNopasswdCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.F
 		if err != nil {
 			continue
 		}
-		s := bufio.NewScanner(f)
-		lineNo := 0
-		for s.Scan() {
-			lineNo++
-			line := strings.TrimSpace(s.Text())
-			if strings.HasPrefix(line, "#") || line == "" {
-				continue
-			}
-			if strings.Contains(line, "NOPASSWD") {
-				bad = append(bad, fmt.Sprintf("%s:%d %s", p, lineNo, line))
-				evs = append(evs, evidence.FileLine(p, lineNo, line))
-			}
-		}
+		b, e := scanNopasswd(f, p)
 		f.Close()
+		bad = append(bad, b...)
+		evs = append(evs, e...)
 	}
 	if len(bad) == 0 {
 		return finding.Finding{Status: finding.StatusPass, Message: "no NOPASSWD entries"}
@@ -183,6 +128,85 @@ func (shadowPermsCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Findi
 		}
 	}
 	return finding.Finding{Status: finding.StatusPass, Message: fmt.Sprintf("/etc/shadow %s", mode), Evidence: []finding.Evidence{ev}}
+}
+
+// parseLoginDefs reads /etc/login.defs-style `KEY value` lines into a map,
+// upper-casing keys, skipping blanks and #-comments.
+func parseLoginDefs(r io.Reader) map[string]string {
+	got := map[string]string{}
+	s := bufio.NewScanner(r)
+	for s.Scan() {
+		line := strings.TrimSpace(s.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) >= 2 {
+			got[strings.ToUpper(fields[0])] = fields[1]
+		}
+	}
+	return got
+}
+
+// evaluateLoginDefs checks parsed login.defs settings against the baseline:
+// password-aging bounds, a restrictive UMASK, and a strong ENCRYPT_METHOD.
+// Returns a human-readable list of violations (empty == compliant).
+func evaluateLoginDefs(got map[string]string) []string {
+	type rule struct {
+		key string
+		max int
+		min int
+	}
+	intRules := []rule{
+		{"PASS_MAX_DAYS", 365, 0},
+		{"PASS_MIN_DAYS", 30, 1},
+		{"PASS_WARN_AGE", 30, 7},
+	}
+	var bad []string
+	for _, r := range intRules {
+		v, ok := got[r.key]
+		if !ok {
+			bad = append(bad, r.key+" unset")
+			continue
+		}
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			bad = append(bad, fmt.Sprintf("%s=%s (not numeric)", r.key, v))
+			continue
+		}
+		if r.max > 0 && n > r.max {
+			bad = append(bad, fmt.Sprintf("%s=%d (>%d)", r.key, n, r.max))
+		}
+		if r.min > 0 && n < r.min {
+			bad = append(bad, fmt.Sprintf("%s=%d (<%d)", r.key, n, r.min))
+		}
+	}
+	if v, ok := got["UMASK"]; ok && v != "027" && v != "077" {
+		bad = append(bad, fmt.Sprintf("UMASK=%s (want 027 or 077)", v))
+	}
+	if v, ok := got["ENCRYPT_METHOD"]; !ok || (v != "SHA512" && v != "YESCRYPT") {
+		bad = append(bad, fmt.Sprintf("ENCRYPT_METHOD=%q (want SHA512 or YESCRYPT)", v))
+	}
+	return bad
+}
+
+// scanNopasswd returns sudoers lines containing NOPASSWD, with file-line
+// evidence. `path` only labels the evidence.
+func scanNopasswd(r io.Reader, path string) (bad []string, evs []finding.Evidence) {
+	s := bufio.NewScanner(r)
+	lineNo := 0
+	for s.Scan() {
+		lineNo++
+		line := strings.TrimSpace(s.Text())
+		if strings.HasPrefix(line, "#") || line == "" {
+			continue
+		}
+		if strings.Contains(line, "NOPASSWD") {
+			bad = append(bad, fmt.Sprintf("%s:%d %s", path, lineNo, line))
+			evs = append(evs, evidence.FileLine(path, lineNo, line))
+		}
+	}
+	return bad, evs
 }
 
 func init() {

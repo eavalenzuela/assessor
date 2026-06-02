@@ -1,8 +1,10 @@
 package auth
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -54,15 +56,7 @@ func (pamPwqualityCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Find
 			Remediation: finding.Remediation{Description: "Install libpam-pwquality and configure minlen, dcredit, ucredit, ocredit, lcredit, retry."},
 		}
 	}
-	var bad []string
-	if v := cfg["minlen"]; v == "" || atoi(v) < 14 {
-		bad = append(bad, fmt.Sprintf("minlen=%q (want >=14)", v))
-	}
-	for _, k := range []string{"dcredit", "ucredit", "ocredit", "lcredit"} {
-		if v := cfg[k]; v == "" || atoi(v) >= 0 {
-			bad = append(bad, fmt.Sprintf("%s=%q (want -1 to require this class)", k, v))
-		}
-	}
+	bad := evaluatePwquality(cfg)
 	ev := evidence.Note("pwquality.conf", fmt.Sprintf("%v", cfg))
 	if len(bad) == 0 {
 		return finding.Finding{Status: finding.StatusPass, Message: "pwquality OK", Evidence: []finding.Evidence{ev}}
@@ -87,8 +81,7 @@ func (pamFaillockCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Findi
 	if contents == "" {
 		return finding.Finding{Status: finding.StatusError, Message: "no PAM files readable"}
 	}
-	hasFaillock := strings.Contains(contents, "pam_faillock.so") || strings.Contains(contents, "pam_tally2.so")
-	if !hasFaillock {
+	if !hasLockoutModule(contents) {
 		return finding.Finding{
 			Status:  finding.StatusFail,
 			Message: "no pam_faillock or pam_tally2 entries — accounts will not lock on repeated failure",
@@ -162,13 +155,54 @@ func (serviceShellsCheck) Meta() finding.Metadata {
 }
 
 func (serviceShellsCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Finding {
-	b, err := os.ReadFile("/etc/passwd")
+	f, err := os.Open("/etc/passwd")
 	if err != nil {
 		return finding.Finding{Status: finding.StatusError, Err: err.Error()}
 	}
+	defer f.Close()
+	bad := scanServiceShells(f)
+	if len(bad) == 0 {
+		return finding.Finding{Status: finding.StatusPass, Message: "all system accounts have nologin"}
+	}
+	return finding.Finding{
+		Status:  finding.StatusFail,
+		Message: strings.Join(bad, "; "),
+		Remediation: finding.Remediation{
+			Commands: []string{"usermod -s /usr/sbin/nologin <user>"},
+		},
+	}
+}
+
+// evaluatePwquality checks parsed pwquality settings: minlen must be >= 14 and
+// each character-class credit (d/u/o/l) must be negative, which forces at least
+// one character of that class. Returns a list of violations (empty == OK).
+func evaluatePwquality(cfg map[string]string) []string {
 	var bad []string
-	for _, line := range strings.Split(string(b), "\n") {
-		fields := strings.Split(line, ":")
+	if v := cfg["minlen"]; v == "" || atoi(v) < 14 {
+		bad = append(bad, fmt.Sprintf("minlen=%q (want >=14)", v))
+	}
+	for _, k := range []string{"dcredit", "ucredit", "ocredit", "lcredit"} {
+		if v := cfg[k]; v == "" || atoi(v) >= 0 {
+			bad = append(bad, fmt.Sprintf("%s=%q (want -1 to require this class)", k, v))
+		}
+	}
+	return bad
+}
+
+// hasLockoutModule reports whether concatenated PAM config references an
+// account-lockout module (pam_faillock or the legacy pam_tally2).
+func hasLockoutModule(contents string) bool {
+	return strings.Contains(contents, "pam_faillock.so") || strings.Contains(contents, "pam_tally2.so")
+}
+
+// scanServiceShells returns system accounts (0 < UID < 1000) that have an
+// interactive login shell. The well-known maintenance accounts sync/shutdown/
+// halt are exempt, as are accounts whose shell ends in nologin or false.
+func scanServiceShells(r io.Reader) []string {
+	var bad []string
+	s := bufio.NewScanner(r)
+	for s.Scan() {
+		fields := strings.Split(s.Text(), ":")
 		if len(fields) < 7 {
 			continue
 		}
@@ -184,16 +218,7 @@ func (serviceShellsCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Fin
 			bad = append(bad, fmt.Sprintf("%s (uid=%d) shell=%s", fields[0], uid, shell))
 		}
 	}
-	if len(bad) == 0 {
-		return finding.Finding{Status: finding.StatusPass, Message: "all system accounts have nologin"}
-	}
-	return finding.Finding{
-		Status:  finding.StatusFail,
-		Message: strings.Join(bad, "; "),
-		Remediation: finding.Remediation{
-			Commands: []string{"usermod -s /usr/sbin/nologin <user>"},
-		},
-	}
+	return bad
 }
 
 func atoi(s string) int {
