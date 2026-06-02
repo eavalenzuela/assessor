@@ -45,7 +45,7 @@ func (unwantedServicesCheck) Run(ctx context.Context, facts sysfacts.Facts) find
 			continue
 		}
 		state := strings.TrimSpace(string(out))
-		if state == "enabled" || state == "static" {
+		if isUnwantedEnabledState(state) {
 			enabled = append(enabled, u)
 			evs = append(evs, evidence.Note("systemctl is-enabled "+u, state))
 		}
@@ -83,12 +83,7 @@ func (unitHardeningCheck) Run(ctx context.Context, facts sysfacts.Facts) finding
 	if err != nil {
 		return finding.Finding{Status: finding.StatusUnverified, Message: "systemd-analyze unavailable", Err: err.Error()}
 	}
-	var risky []string
-	for _, line := range strings.Split(string(out), "\n") {
-		if strings.Contains(line, "EXPOSED") || strings.Contains(line, "UNSAFE") {
-			risky = append(risky, strings.TrimSpace(line))
-		}
-	}
+	risky := riskyUnits(string(out))
 	ev := evidence.Note("systemd-analyze security", string(out))
 	if len(risky) == 0 {
 		return finding.Finding{Status: finding.StatusPass, Message: "no exposed/unsafe units", Evidence: []finding.Evidence{ev}}
@@ -101,6 +96,24 @@ func (unitHardeningCheck) Run(ctx context.Context, facts sysfacts.Facts) finding
 			Description: "Add NoNewPrivileges, ProtectSystem, ProtectHome, PrivateTmp, etc., to drop-in overrides.",
 		},
 	}
+}
+
+// isUnwantedEnabledState reports whether a `systemctl is-enabled` state means
+// the unit is active in boot — "enabled" or "static" both pull the unit in.
+func isUnwantedEnabledState(state string) bool {
+	return state == "enabled" || state == "static"
+}
+
+// riskyUnits returns the `systemd-analyze security` lines rated EXPOSED or
+// UNSAFE (the two worst exposure levels).
+func riskyUnits(out string) []string {
+	var risky []string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "EXPOSED") || strings.Contains(line, "UNSAFE") {
+			risky = append(risky, strings.TrimSpace(line))
+		}
+	}
+	return risky
 }
 
 func init() {

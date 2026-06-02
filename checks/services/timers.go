@@ -31,12 +31,7 @@ func (timersInventoryCheck) Run(ctx context.Context, facts sysfacts.Facts) findi
 	if err != nil {
 		return finding.Finding{Status: finding.StatusError, Err: err.Error()}
 	}
-	lines := []string{}
-	for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if strings.TrimSpace(l) != "" {
-			lines = append(lines, l)
-		}
-	}
+	lines := nonEmptyLines(string(out))
 	ev := evidence.TrackedNote("systemctl list-timers", strings.Join(lines, "\n"))
 	return finding.Finding{
 		Status:   finding.StatusWarn,

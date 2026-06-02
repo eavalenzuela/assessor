@@ -30,12 +30,7 @@ func (failedUnitsCheck) Run(ctx context.Context, facts sysfacts.Facts) finding.F
 	if err != nil {
 		return finding.Finding{Status: finding.StatusError, Err: err.Error()}
 	}
-	lines := []string{}
-	for _, l := range strings.Split(strings.TrimSpace(ev.Content), "\n") {
-		if strings.TrimSpace(l) != "" {
-			lines = append(lines, l)
-		}
-	}
+	lines := nonEmptyLines(ev.Content)
 	if len(lines) == 0 {
 		return finding.Finding{Status: finding.StatusPass, Message: "no failed units"}
 	}
@@ -47,6 +42,18 @@ func (failedUnitsCheck) Run(ctx context.Context, facts sysfacts.Facts) finding.F
 			Description: "Investigate with `systemctl status <unit>` and `journalctl -u <unit>`.",
 		},
 	}
+}
+
+// nonEmptyLines splits content on newlines and drops blank/whitespace-only
+// lines. Shared by the systemctl-output parsers in this package.
+func nonEmptyLines(content string) []string {
+	var lines []string
+	for _, l := range strings.Split(strings.TrimSpace(content), "\n") {
+		if strings.TrimSpace(l) != "" {
+			lines = append(lines, l)
+		}
+	}
+	return lines
 }
 
 func init() { engine.Register(failedUnitsCheck{}) }
