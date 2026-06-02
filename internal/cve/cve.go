@@ -22,21 +22,21 @@ const (
 )
 
 type Vuln struct {
-	ID         string   `json:"id"`
-	Source     string   `json:"source"`
-	Summary    string   `json:"summary"`
-	Severity   Severity `json:"severity"`
-	CVSS       float64  `json:"cvss,omitempty"`
-	Published  string   `json:"published,omitempty"`
-	References []string `json:"references,omitempty"`
+	ID         string     `json:"id"`
+	Source     string     `json:"source"`
+	Summary    string     `json:"summary"`
+	Severity   Severity   `json:"severity"`
+	CVSS       float64    `json:"cvss,omitempty"`
+	Published  string     `json:"published,omitempty"`
+	References []string   `json:"references,omitempty"`
 	Affected   []Affected `json:"affected"`
 }
 
 type Affected struct {
-	Ecosystem string `json:"ecosystem"`
-	Package   string `json:"package"`
+	Ecosystem  string `json:"ecosystem"`
+	Package    string `json:"package"`
 	Introduced string `json:"introduced,omitempty"`
-	Fixed     string `json:"fixed,omitempty"`
+	Fixed      string `json:"fixed,omitempty"`
 }
 
 type Package struct {
@@ -60,7 +60,7 @@ func NewDB() *DB {
 
 func (db *DB) Add(v Vuln) {
 	for _, a := range v.Affected {
-		key := a.Ecosystem + "::" + strings.ToLower(a.Package)
+		key := pkgKey(a.Ecosystem, a.Package)
 		db.byPackage[key] = append(db.byPackage[key], v)
 	}
 }
@@ -68,7 +68,7 @@ func (db *DB) Add(v Vuln) {
 func (db *DB) Match(pkgs []Package) []Match {
 	var out []Match
 	for _, p := range pkgs {
-		key := p.Ecosystem + "::" + strings.ToLower(p.Name)
+		key := pkgKey(p.Ecosystem, p.Name)
 		for _, v := range db.byPackage[key] {
 			if affects(v, p) {
 				out = append(out, Match{Package: p, Vuln: v})
@@ -78,14 +78,56 @@ func (db *DB) Match(pkgs []Package) []Match {
 	return out
 }
 
+// pkgKey builds the index/lookup key for a package. The ecosystem is
+// canonicalized so that the many spellings a feed may use (OSV's "Debian" /
+// "Ubuntu", our lister's "deb") collapse to one bucket; the name is
+// lowercased so matching is case-insensitive.
+func pkgKey(ecosystem, name string) string {
+	return canonicalEcosystem(ecosystem) + "::" + strings.ToLower(name)
+}
+
+// canonicalEcosystem normalizes the assorted ecosystem spellings that arrive
+// from OSV feeds, NVD, and our own package listers down to a single key. This
+// is the linchpin that lets a package the apt lister tags "deb" match an OSV
+// record tagged "Debian" or "Ubuntu" — without it the two never share a key
+// and CVE matching silently returns nothing.
+//
+// OSV tags distro records with a release suffix ("Debian:12",
+// "Ubuntu:22.04:LTS", "Alpine:v3.18"); we collapse to the distro family before
+// matching. That trades per-release precision for the ability to match at all —
+// the package listers don't record which release a package came from, and the
+// version comparators are release-agnostic. Cross-release version strings are
+// distinct enough in practice that false matches are rare.
+func canonicalEcosystem(s string) string {
+	base := strings.TrimSpace(s)
+	if i := strings.IndexByte(base, ':'); i >= 0 {
+		base = base[:i] // drop OSV release suffix, e.g. "Debian:12" -> "Debian"
+	}
+	switch strings.ToLower(strings.TrimSpace(base)) {
+	case "deb", "debian", "ubuntu", "debian gnu/linux":
+		return "deb"
+	case "rpm", "rhel", "red hat", "redhat", "fedora", "centos",
+		"rocky", "rocky linux", "alma", "almalinux", "suse", "opensuse", "sles":
+		return "rpm"
+	case "arch", "arch linux", "archlinux":
+		return "arch"
+	case "alpine":
+		return "alpine"
+	case "":
+		return ""
+	default:
+		return strings.ToLower(base)
+	}
+}
+
 func affects(v Vuln, p Package) bool {
 	for _, a := range v.Affected {
 		if !strings.EqualFold(a.Package, p.Name) {
 			continue
 		}
-		eco := a.Ecosystem
+		eco := canonicalEcosystem(a.Ecosystem)
 		if eco == "" {
-			eco = p.Ecosystem
+			eco = canonicalEcosystem(p.Ecosystem)
 		}
 		if a.Fixed == "" {
 			return true
@@ -137,9 +179,9 @@ func (db *DB) SaveCache(path string) error {
 	return os.WriteFile(path, b, 0o640)
 }
 
-// FetchOSV fetches a single OSV record by ID.
-// Bulk download is via OSV.dev export buckets per ecosystem; left as a follow-up
-// because it is large and should be cached.
+// FetchOSV fetches a single OSV record by ID. For populating the cache, prefer
+// OSVDownloader.FetchEcosystem (bulk per-ecosystem export) — this single-record
+// fetch is for ad-hoc lookups.
 func FetchOSV(ctx string, id string) (Vuln, error) {
 	url := fmt.Sprintf("https://api.osv.dev/v1/vulns/%s", id)
 	client := &http.Client{Timeout: 15 * time.Second}

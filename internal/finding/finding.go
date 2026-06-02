@@ -90,8 +90,8 @@ type HostInfo struct {
 }
 
 type Summary struct {
-	Total      int            `json:"total"`
-	ByStatus   map[Status]int `json:"by_status"`
+	Total      int              `json:"total"`
+	ByStatus   map[Status]int   `json:"by_status"`
 	BySeverity map[Severity]int `json:"by_severity"`
-	RiskScore  int            `json:"risk_score"`
+	RiskScore  int              `json:"risk_score"`
 }

@@ -86,9 +86,9 @@ func dnfUpdates(mgr string) finding.Finding {
 		return finding.Finding{Status: finding.StatusPass, Message: "no security updates pending", Evidence: []finding.Evidence{ev}}
 	}
 	return finding.Finding{
-		Status:   finding.StatusFail,
-		Message:  fmt.Sprintf("%d security update(s) pending", count),
-		Evidence: []finding.Evidence{ev},
+		Status:      finding.StatusFail,
+		Message:     fmt.Sprintf("%d security update(s) pending", count),
+		Evidence:    []finding.Evidence{ev},
 		Remediation: finding.Remediation{Commands: []string{mgr + " upgrade --security"}},
 	}
 }

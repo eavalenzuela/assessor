@@ -51,10 +51,10 @@ func Load(dir, name string) (*Profile, error) {
 
 // Match returns true if the given check metadata is included in the profile.
 // Logic:
-//   1. ExcludeBuckets / ExcludeIDs always win.
-//   2. If IncludeBuckets / IncludeIDs are set, require a match against them.
-//   3. If any include/exclude list is set (even just excludes), match-all-rest.
-//   4. Otherwise (no lists), fall back to inline `m.Profiles` matching by name.
+//  1. ExcludeBuckets / ExcludeIDs always win.
+//  2. If IncludeBuckets / IncludeIDs are set, require a match against them.
+//  3. If any include/exclude list is set (even just excludes), match-all-rest.
+//  4. Otherwise (no lists), fall back to inline `m.Profiles` matching by name.
 func (p *Profile) Match(m finding.Metadata) bool {
 	if p == nil {
 		return true

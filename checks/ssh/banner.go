@@ -47,8 +47,8 @@ func (bannerCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Finding {
 	}
 	if st, err := os.Stat(bv.val); err != nil || st.Size() == 0 {
 		return finding.Finding{
-			Status:  finding.StatusFail,
-			Message: "Banner points to missing or empty file: " + bv.val,
+			Status:   finding.StatusFail,
+			Message:  "Banner points to missing or empty file: " + bv.val,
 			Evidence: []finding.Evidence{evidence.Note(path, "Banner "+bv.val)},
 		}
 	}

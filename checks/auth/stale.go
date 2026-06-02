@@ -44,8 +44,8 @@ func (staleAccountsCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Fin
 	}
 	ev := evidence.Note("lastlog -b 180", string(out))
 	return finding.Finding{
-		Status:  finding.StatusWarn,
-		Message: fmt.Sprintf("%d account(s) unused for >180 days — review if needed", len(stale)),
+		Status:   finding.StatusWarn,
+		Message:  fmt.Sprintf("%d account(s) unused for >180 days — review if needed", len(stale)),
 		Evidence: []finding.Evidence{ev},
 		Remediation: finding.Remediation{
 			Description: "Lock or remove abandoned accounts.",

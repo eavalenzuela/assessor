@@ -28,12 +28,12 @@ func (privilegedCheck) Meta() finding.Metadata {
 type containerInspect struct {
 	Name       string `json:"Name"`
 	HostConfig struct {
-		Privileged   bool     `json:"Privileged"`
-		CapAdd       []string `json:"CapAdd"`
-		PidMode      string   `json:"PidMode"`
-		NetworkMode  string   `json:"NetworkMode"`
-		IpcMode      string   `json:"IpcMode"`
-		UsernsMode   string   `json:"UsernsMode"`
+		Privileged  bool     `json:"Privileged"`
+		CapAdd      []string `json:"CapAdd"`
+		PidMode     string   `json:"PidMode"`
+		NetworkMode string   `json:"NetworkMode"`
+		IpcMode     string   `json:"IpcMode"`
+		UsernsMode  string   `json:"UsernsMode"`
 	} `json:"HostConfig"`
 }
 

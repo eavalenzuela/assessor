@@ -53,18 +53,18 @@ func main() {
 
 func runCmd() *cobra.Command {
 	var (
-		profile     string
-		buckets     []string
-		ids         []string
-		parallel    int
-		outJSON     string
-		outPDF      string
-		cveDB       string
-		saveSnap    bool
-		snapDir     string
-		quietTTY    bool
-		skipRoot    bool
-		profileDir  string
+		profile    string
+		buckets    []string
+		ids        []string
+		parallel   int
+		outJSON    string
+		outPDF     string
+		cveDB      string
+		saveSnap   bool
+		snapDir    string
+		quietTTY   bool
+		skipRoot   bool
+		profileDir string
 	)
 	cmd := &cobra.Command{
 		Use:   "run",
@@ -163,9 +163,9 @@ func listCmd() *cobra.Command {
 
 func diffCmd() *cobra.Command {
 	var (
-		prevPath  string
-		asJSON    bool
-		skipRoot  bool
+		prevPath string
+		asJSON   bool
+		skipRoot bool
 	)
 	cmd := &cobra.Command{
 		Use:   "diff",
@@ -212,32 +212,64 @@ func cveCmd() *cobra.Command {
 		Use:   "cve",
 		Short: "Manage CVE feed cache",
 	}
-	var out string
+	var (
+		out        string
+		source     string
+		ecosystems []string
+	)
 	sync := &cobra.Command{
 		Use:   "sync",
-		Short: "Sync NVD into a local cache file (paginated, slow without API key)",
+		Short: "Sync a CVE feed into a local cache file",
+		Long: "Sync a CVE feed into a local cache file.\n\n" +
+			"--source osv (default) pulls OSV's distro ecosystem feeds, whose package\n" +
+			"names line up with installed packages, so `run --cve-db` actually matches.\n" +
+			"--source nvd pulls the CPE-based NVD feed (set NVD_API_KEY to avoid rate\n" +
+			"limits); it is broad but its CPE product names do not map cleanly onto\n" +
+			"distro package names, so distro matching is unreliable.",
 		RunE: func(c *cobra.Command, args []string) error {
 			db := cve.NewDB()
-			n := &cve.NVDDownloader{APIKey: os.Getenv("NVD_API_KEY")}
-			start := 0
-			for {
-				vs, total, err := n.FetchPage(start)
-				if err != nil {
-					return err
+			switch source {
+			case "osv":
+				if len(ecosystems) == 0 {
+					ecosystems = cve.DefaultOSVEcosystems
 				}
-				for _, v := range vs {
-					db.Add(v)
+				d := &cve.OSVDownloader{}
+				for _, eco := range ecosystems {
+					vs, err := d.FetchEcosystem(eco)
+					if err != nil {
+						return err
+					}
+					for _, v := range vs {
+						db.Add(v)
+					}
+					fmt.Fprintf(os.Stderr, "osv %s: %d records\n", eco, len(vs))
 				}
-				start += len(vs)
-				fmt.Fprintf(os.Stderr, "fetched %d / %d\n", start, total)
-				if start >= total || len(vs) == 0 {
-					break
+			case "nvd":
+				n := &cve.NVDDownloader{APIKey: os.Getenv("NVD_API_KEY")}
+				start := 0
+				for {
+					vs, total, err := n.FetchPage(start)
+					if err != nil {
+						return err
+					}
+					for _, v := range vs {
+						db.Add(v)
+					}
+					start += len(vs)
+					fmt.Fprintf(os.Stderr, "fetched %d / %d\n", start, total)
+					if start >= total || len(vs) == 0 {
+						break
+					}
 				}
+			default:
+				return fmt.Errorf("unknown --source %q (want: osv, nvd)", source)
 			}
 			return db.SaveCache(out)
 		},
 	}
 	sync.Flags().StringVar(&out, "out", "/var/lib/assessor/cve.json", "cache output path")
+	sync.Flags().StringVar(&source, "source", "osv", "feed source: osv or nvd")
+	sync.Flags().StringSliceVar(&ecosystems, "ecosystem", nil, "OSV ecosystems to fetch (default: common distros)")
 	cmd.AddCommand(sync)
 	return cmd
 }
