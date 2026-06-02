@@ -62,6 +62,26 @@ func (privilegedCheck) Run(ctx context.Context, facts sysfacts.Facts) finding.Fi
 	if err := json.Unmarshal(out, &inspects); err != nil {
 		return finding.Finding{Status: finding.StatusError, Err: err.Error()}
 	}
+	bad := evaluatePrivileged(inspects)
+	if len(bad) == 0 {
+		return finding.Finding{Status: finding.StatusPass, Message: fmt.Sprintf("%d container(s) running, none privileged", len(inspects))}
+	}
+	return finding.Finding{
+		Status:  finding.StatusFail,
+		Message: strings.Join(bad, "; "),
+		Evidence: []finding.Evidence{
+			evidence.Note(bin+" inspect", strings.Join(bad, "\n")),
+		},
+		Remediation: finding.Remediation{
+			Description: "Drop --privileged and tighten capabilities/network/PID namespaces.",
+		},
+	}
+}
+
+// evaluatePrivileged returns a "name: issue,issue" line for each running
+// container with a dangerous host-config: --privileged, host PID/network
+// namespace, or a CapAdd of SYS_ADMIN/ALL.
+func evaluatePrivileged(inspects []containerInspect) []string {
 	var bad []string
 	for _, c := range inspects {
 		var issues []string
@@ -83,19 +103,7 @@ func (privilegedCheck) Run(ctx context.Context, facts sysfacts.Facts) finding.Fi
 			bad = append(bad, fmt.Sprintf("%s: %s", strings.TrimPrefix(c.Name, "/"), strings.Join(issues, ",")))
 		}
 	}
-	if len(bad) == 0 {
-		return finding.Finding{Status: finding.StatusPass, Message: fmt.Sprintf("%d container(s) running, none privileged", len(inspects))}
-	}
-	return finding.Finding{
-		Status:  finding.StatusFail,
-		Message: strings.Join(bad, "; "),
-		Evidence: []finding.Evidence{
-			evidence.Note(bin+" inspect", strings.Join(bad, "\n")),
-		},
-		Remediation: finding.Remediation{
-			Description: "Drop --privileged and tighten capabilities/network/PID namespaces.",
-		},
-	}
+	return bad
 }
 
 func init() { engine.Register(privilegedCheck{}) }

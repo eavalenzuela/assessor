@@ -48,19 +48,9 @@ func (dockerDaemonCheck) Run(ctx context.Context, facts sysfacts.Facts) finding.
 			},
 		}
 	}
-	var cfg dockerDaemonCfg
-	if err := json.Unmarshal(b, &cfg); err != nil {
+	bad, err := evaluateDockerDaemon(b)
+	if err != nil {
 		return finding.Finding{Status: finding.StatusError, Err: err.Error()}
-	}
-	var bad []string
-	if cfg.UsernsRemap == "" {
-		bad = append(bad, "userns-remap not set")
-	}
-	if !cfg.NoNewPrivileges {
-		bad = append(bad, "no-new-privileges not enabled")
-	}
-	if !cfg.LiveRestore {
-		bad = append(bad, "live-restore disabled")
 	}
 	ev, _ := evidence.File(path)
 	if len(bad) == 0 {
@@ -74,6 +64,26 @@ func (dockerDaemonCheck) Run(ctx context.Context, facts sysfacts.Facts) finding.
 			Commands: []string{`echo '{"userns-remap":"default","no-new-privileges":true,"live-restore":true}' > /etc/docker/daemon.json`, "systemctl restart docker"},
 		},
 	}
+}
+
+// evaluateDockerDaemon parses /etc/docker/daemon.json and returns the missing
+// hardening settings (userns-remap, no-new-privileges, live-restore).
+func evaluateDockerDaemon(b []byte) ([]string, error) {
+	var cfg dockerDaemonCfg
+	if err := json.Unmarshal(b, &cfg); err != nil {
+		return nil, err
+	}
+	var bad []string
+	if cfg.UsernsRemap == "" {
+		bad = append(bad, "userns-remap not set")
+	}
+	if !cfg.NoNewPrivileges {
+		bad = append(bad, "no-new-privileges not enabled")
+	}
+	if !cfg.LiveRestore {
+		bad = append(bad, "live-restore disabled")
+	}
+	return bad, nil
 }
 
 func init() { engine.Register(dockerDaemonCheck{}) }

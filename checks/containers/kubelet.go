@@ -68,22 +68,9 @@ func (kubeletCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Finding {
 	if err != nil {
 		return finding.Finding{Status: finding.StatusError, Err: err.Error()}
 	}
-	var cfg kubeletConfig
-	if err := yaml.Unmarshal(b, &cfg); err != nil {
-		// try JSON
-		if jerr := json.Unmarshal(b, &cfg); jerr != nil {
-			return finding.Finding{Status: finding.StatusError, Err: err.Error()}
-		}
-	}
-	var bad []string
-	if cfg.Authentication.Anonymous.Enabled {
-		bad = append(bad, "anonymous auth enabled")
-	}
-	if strings.EqualFold(cfg.Authorization.Mode, "AlwaysAllow") || cfg.Authorization.Mode == "" {
-		bad = append(bad, fmt.Sprintf("authorization.mode=%q (want Webhook)", cfg.Authorization.Mode))
-	}
-	if cfg.ReadOnlyPort != 0 {
-		bad = append(bad, fmt.Sprintf("readOnlyPort=%d (want 0)", cfg.ReadOnlyPort))
+	bad, err := evaluateKubelet(b)
+	if err != nil {
+		return finding.Finding{Status: finding.StatusError, Err: err.Error()}
 	}
 	ev, _ := evidence.File(path)
 	if len(bad) == 0 {
@@ -97,6 +84,31 @@ func (kubeletCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Finding {
 			Description: "Set authentication.anonymous.enabled=false, authorization.mode=Webhook, readOnlyPort=0; restart kubelet.",
 		},
 	}
+}
+
+// evaluateKubelet parses a kubelet config (YAML or JSON) and returns the
+// hardening violations: anonymous auth enabled, an AlwaysAllow/empty
+// authorization mode, or a non-zero read-only port. YAML is a JSON superset so
+// yaml.Unmarshal handles both; the explicit JSON retry is a belt-and-braces
+// fallback.
+func evaluateKubelet(b []byte) ([]string, error) {
+	var cfg kubeletConfig
+	if err := yaml.Unmarshal(b, &cfg); err != nil {
+		if jerr := json.Unmarshal(b, &cfg); jerr != nil {
+			return nil, err
+		}
+	}
+	var bad []string
+	if cfg.Authentication.Anonymous.Enabled {
+		bad = append(bad, "anonymous auth enabled")
+	}
+	if strings.EqualFold(cfg.Authorization.Mode, "AlwaysAllow") || cfg.Authorization.Mode == "" {
+		bad = append(bad, fmt.Sprintf("authorization.mode=%q (want Webhook)", cfg.Authorization.Mode))
+	}
+	if cfg.ReadOnlyPort != 0 {
+		bad = append(bad, fmt.Sprintf("readOnlyPort=%d (want 0)", cfg.ReadOnlyPort))
+	}
+	return bad, nil
 }
 
 func init() { engine.Register(kubeletCheck{}) }

@@ -41,22 +41,28 @@ func (rootlessCheck) Run(ctx context.Context, facts sysfacts.Facts) finding.Find
 		}
 		s := string(out)
 		ev := evidence.Note("docker info SecurityOptions", s)
-		switch {
-		case strings.Contains(s, "rootless"):
-			return finding.Finding{Status: finding.StatusPass, Message: "docker rootless", Evidence: []finding.Evidence{ev}}
-		case strings.Contains(s, "userns"):
-			return finding.Finding{Status: finding.StatusPass, Message: "docker userns-remap active", Evidence: []finding.Evidence{ev}}
-		}
-		return finding.Finding{
-			Status:   finding.StatusWarn,
-			Message:  "docker daemon is rootful and not using userns-remap",
-			Evidence: []finding.Evidence{ev},
-			Remediation: finding.Remediation{
+		status, msg := classifyDockerRootless(s)
+		f := finding.Finding{Status: status, Message: msg, Evidence: []finding.Evidence{ev}}
+		if status == finding.StatusWarn {
+			f.Remediation = finding.Remediation{
 				Description: "Add `\"userns-remap\": \"default\"` to /etc/docker/daemon.json or migrate to rootless.",
-			},
+			}
 		}
+		return f
 	}
 	return finding.Finding{Status: finding.StatusUnverified, Message: "could not determine rootless status"}
+}
+
+// classifyDockerRootless interprets `docker info` SecurityOptions: a rootless
+// or userns-remap daemon passes; anything else is a rootful Warn.
+func classifyDockerRootless(securityOptions string) (finding.Status, string) {
+	switch {
+	case strings.Contains(securityOptions, "rootless"):
+		return finding.StatusPass, "docker rootless"
+	case strings.Contains(securityOptions, "userns"):
+		return finding.StatusPass, "docker userns-remap active"
+	}
+	return finding.StatusWarn, "docker daemon is rootful and not using userns-remap"
 }
 
 func init() { engine.Register(rootlessCheck{}) }
