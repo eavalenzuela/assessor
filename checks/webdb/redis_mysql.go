@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -34,23 +35,31 @@ func (redisCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Finding {
 			return finding.Finding{Status: finding.StatusError, Err: err.Error()}
 		}
 		ev, _ := evidence.File(p)
-		bind := cfg["bind"]
-		protected := strings.ToLower(cfg["protected-mode"])
-		requirepass := cfg["requirepass"]
-		boundExternal := bind != "" && !isLoopbackOnly(bind)
-		if boundExternal && (requirepass == "" || protected != "yes") {
-			return finding.Finding{
-				Status:   finding.StatusFail,
-				Message:  fmt.Sprintf("redis bind=%q requirepass=%q protected-mode=%q", bind, requirepass, protected),
-				Evidence: []finding.Evidence{ev},
-				Remediation: finding.Remediation{
-					Description: "Bind to 127.0.0.1, or set protected-mode yes AND a strong requirepass.",
-				},
+		status, msg := evaluateRedis(cfg)
+		out := finding.Finding{Status: status, Message: msg, Evidence: []finding.Evidence{ev}}
+		if status == finding.StatusFail {
+			out.Remediation = finding.Remediation{
+				Description: "Bind to 127.0.0.1, or set protected-mode yes AND a strong requirepass.",
 			}
 		}
-		return finding.Finding{Status: finding.StatusPass, Message: "redis config OK", Evidence: []finding.Evidence{ev}}
+		return out
 	}
 	return finding.Finding{Status: finding.StatusSkipped, Message: "no redis config found"}
+}
+
+// evaluateRedis decides whether a parsed redis config exposes the server
+// unsafely. A redis bound to a non-loopback address is a Fail unless it has
+// BOTH protected-mode yes AND a requirepass; loopback-only (or unset bind) is
+// always a Pass.
+func evaluateRedis(cfg map[string]string) (finding.Status, string) {
+	bind := cfg["bind"]
+	protected := strings.ToLower(cfg["protected-mode"])
+	requirepass := cfg["requirepass"]
+	boundExternal := bind != "" && !isLoopbackOnly(bind)
+	if boundExternal && (requirepass == "" || protected != "yes") {
+		return finding.StatusFail, fmt.Sprintf("redis bind=%q requirepass=%q protected-mode=%q", bind, requirepass, protected)
+	}
+	return finding.StatusPass, "redis config OK"
 }
 
 func isLoopbackOnly(bind string) bool {
@@ -85,26 +94,30 @@ func (mysqlBindCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Finding
 		}
 		bind := iniValue(p, "bind-address")
 		ev, _ := evidence.File(p)
-		if bind == "" {
-			return finding.Finding{
-				Status:   finding.StatusWarn,
-				Message:  "bind-address not set; default may be 0.0.0.0",
-				Evidence: []finding.Evidence{ev},
-				Remediation: finding.Remediation{
-					Commands: []string{"echo 'bind-address = 127.0.0.1' >> " + p, "systemctl restart mariadb"},
-				},
+		status, msg := evaluateMysqlBind(bind)
+		out := finding.Finding{Status: status, Message: msg, Evidence: []finding.Evidence{ev}}
+		if status == finding.StatusWarn {
+			out.Remediation = finding.Remediation{
+				Commands: []string{"echo 'bind-address = 127.0.0.1' >> " + p, "systemctl restart mariadb"},
 			}
 		}
-		if bind == "0.0.0.0" || bind == "::" {
-			return finding.Finding{
-				Status:   finding.StatusFail,
-				Message:  "bind-address listens on all interfaces",
-				Evidence: []finding.Evidence{ev},
-			}
-		}
-		return finding.Finding{Status: finding.StatusPass, Message: "bind-address=" + bind, Evidence: []finding.Evidence{ev}}
+		return out
 	}
 	return finding.Finding{Status: finding.StatusSkipped, Message: "no MySQL/MariaDB config found"}
+}
+
+// evaluateMysqlBind classifies a MySQL/MariaDB bind-address value: unset is a
+// Warn (the default may be 0.0.0.0), an explicit all-interfaces value is a
+// Fail, and anything else (a specific address) passes.
+func evaluateMysqlBind(bind string) (finding.Status, string) {
+	switch bind {
+	case "":
+		return finding.StatusWarn, "bind-address not set; default may be 0.0.0.0"
+	case "0.0.0.0", "::":
+		return finding.StatusFail, "bind-address listens on all interfaces"
+	default:
+		return finding.StatusPass, "bind-address=" + bind
+	}
 }
 
 func simpleKV(path string) (map[string]string, error) {
@@ -113,8 +126,14 @@ func simpleKV(path string) (map[string]string, error) {
 		return nil, err
 	}
 	defer f.Close()
+	return parseKV(f), nil
+}
+
+// parseKV reads space-separated `key value` config lines (redis style),
+// skipping blanks and #-comments and stripping surrounding quotes from values.
+func parseKV(r io.Reader) map[string]string {
 	m := map[string]string{}
-	s := bufio.NewScanner(f)
+	s := bufio.NewScanner(r)
 	for s.Scan() {
 		line := strings.TrimSpace(s.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -125,7 +144,7 @@ func simpleKV(path string) (map[string]string, error) {
 			m[fields[0]] = strings.Trim(strings.Join(fields[1:], " "), `"`)
 		}
 	}
-	return m, nil
+	return m
 }
 
 func iniValue(path, key string) string {
@@ -134,7 +153,14 @@ func iniValue(path, key string) string {
 		return ""
 	}
 	defer f.Close()
-	s := bufio.NewScanner(f)
+	return parseINIValue(f, key)
+}
+
+// parseINIValue returns the first `key = value` match (case-insensitive key)
+// from INI-style content, skipping blanks and #/; comments. Returns "" if the
+// key is absent.
+func parseINIValue(r io.Reader, key string) string {
+	s := bufio.NewScanner(r)
 	for s.Scan() {
 		line := strings.TrimSpace(s.Text())
 		if strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") || line == "" {
