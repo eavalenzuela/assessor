@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -81,7 +82,20 @@ func loadHomes() ([]string, error) {
 	}
 	defer f.Close()
 	var out []string
-	s := bufio.NewScanner(f)
+	for _, home := range parsePasswdHomes(f) {
+		if st, err := os.Stat(home); err == nil && st.IsDir() {
+			out = append(out, home)
+		}
+	}
+	return out, nil
+}
+
+// parsePasswdHomes returns the home directories of interactive accounts from a
+// passwd stream — accounts whose shell ends in nologin/false, or whose home is
+// empty or "/", are excluded. It does not stat the directories; loadHomes does.
+func parsePasswdHomes(r io.Reader) []string {
+	var out []string
+	s := bufio.NewScanner(r)
 	for s.Scan() {
 		fields := strings.Split(s.Text(), ":")
 		if len(fields) < 7 {
@@ -95,11 +109,9 @@ func loadHomes() ([]string, error) {
 		if home == "" || home == "/" {
 			continue
 		}
-		if st, err := os.Stat(home); err == nil && st.IsDir() {
-			out = append(out, home)
-		}
+		out = append(out, home)
 	}
-	return out, nil
+	return out
 }
 
 type luksCheck struct{}

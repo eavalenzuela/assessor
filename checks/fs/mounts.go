@@ -37,17 +37,44 @@ func (mountOptionsCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Find
 	if err != nil {
 		return finding.Finding{Status: finding.StatusError, Err: err.Error()}
 	}
+	mounts := parseMounts(string(b))
+	bad, missingByPath := evaluateMounts(mounts)
+	var evs []finding.Evidence
+	for _, path := range missingByPath {
+		evs = append(evs, evidence.Note("/proc/mounts", path+" "+strings.Join(mounts[path], ",")))
+	}
+	if len(bad) == 0 {
+		return finding.Finding{Status: finding.StatusPass, Message: "mount options OK"}
+	}
+	return finding.Finding{
+		Status:   finding.StatusFail,
+		Message:  strings.Join(bad, "; "),
+		Evidence: evs,
+		Remediation: finding.Remediation{
+			Description: "Add the missing options to /etc/fstab and remount.",
+			Commands:    []string{"mount -o remount,nosuid,nodev,noexec /tmp"},
+		},
+	}
+}
+
+// parseMounts parses /proc/mounts into mountpoint -> options. Field 1 is the
+// mountpoint, field 3 the comma-separated options.
+func parseMounts(content string) map[string][]string {
 	mounts := map[string][]string{}
-	for _, line := range strings.Split(string(b), "\n") {
+	for _, line := range strings.Split(content, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) < 4 {
 			continue
 		}
 		mounts[fields[1]] = strings.Split(fields[3], ",")
 	}
+	return mounts
+}
 
-	var bad []string
-	var evs []finding.Evidence
+// evaluateMounts checks each sensitive path in mountExpect for its required
+// hardening options. Returns human-readable "path missing x,y" lines plus the
+// list of offending paths (for evidence). Paths not present are skipped.
+func evaluateMounts(mounts map[string][]string) (bad []string, missingPaths []string) {
 	for path, want := range mountExpect {
 		opts, ok := mounts[path]
 		if !ok {
@@ -65,21 +92,10 @@ func (mountOptionsCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Find
 		}
 		if len(missing) > 0 {
 			bad = append(bad, fmt.Sprintf("%s missing %s", path, strings.Join(missing, ",")))
-			evs = append(evs, evidence.Note("/proc/mounts", path+" "+strings.Join(opts, ",")))
+			missingPaths = append(missingPaths, path)
 		}
 	}
-	if len(bad) == 0 {
-		return finding.Finding{Status: finding.StatusPass, Message: "mount options OK"}
-	}
-	return finding.Finding{
-		Status:   finding.StatusFail,
-		Message:  strings.Join(bad, "; "),
-		Evidence: evs,
-		Remediation: finding.Remediation{
-			Description: "Add the missing options to /etc/fstab and remount.",
-			Commands:    []string{"mount -o remount,nosuid,nodev,noexec /tmp"},
-		},
-	}
+	return bad, missingPaths
 }
 
 func init() { engine.Register(mountOptionsCheck{}) }
