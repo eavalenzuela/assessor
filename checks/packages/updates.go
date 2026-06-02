@@ -40,15 +40,7 @@ func aptUpdates() finding.Finding {
 	if err != nil {
 		return finding.Finding{Status: finding.StatusError, Err: err.Error()}
 	}
-	var upgrades, security int
-	for _, line := range strings.Split(string(out), "\n") {
-		if strings.HasPrefix(line, "Inst ") {
-			upgrades++
-			if strings.Contains(line, "-security") || strings.Contains(line, "Debian-Security") {
-				security++
-			}
-		}
-	}
+	upgrades, security := countAptUpgrades(string(out))
 	ev := evidence.Note("apt-get -s upgrade", fmt.Sprintf("upgrades=%d security=%d", upgrades, security))
 	if upgrades == 0 {
 		return finding.Finding{Status: finding.StatusPass, Message: "no pending updates", Evidence: []finding.Evidence{ev}}
@@ -72,12 +64,7 @@ func dnfUpdates(mgr string) finding.Finding {
 	out, err := exec.Command(mgr, "-q", "check-update", "--security").Output()
 	// dnf returns exit 100 when updates exist — that's not a Go error from Output,
 	// but if it is, we still want to count.
-	count := 0
-	for _, line := range strings.Split(string(out), "\n") {
-		if line != "" && !strings.HasPrefix(line, "Last metadata") {
-			count++
-		}
-	}
+	count := countDnfUpdates(string(out))
 	ev := evidence.Note(mgr+" check-update --security", string(out))
 	if err != nil && count == 0 {
 		return finding.Finding{Status: finding.StatusError, Err: err.Error()}
@@ -126,38 +113,72 @@ var distroEOL = map[string]map[string]time.Time{
 }
 
 func (eolDistroCheck) Run(ctx context.Context, facts sysfacts.Facts) finding.Finding {
-	id := strings.ToLower(facts.OSReleaseID)
+	status, msg := evaluateEOL(facts.OSReleaseID, facts.OSReleaseVer, time.Now())
+	f := finding.Finding{Status: status, Message: msg}
+	if status != finding.StatusUnverified {
+		id := strings.ToLower(facts.OSReleaseID)
+		eol := distroEOL[id][facts.OSReleaseVer]
+		f.Evidence = []finding.Evidence{
+			evidence.Note("os-release", fmt.Sprintf("%s %s, EOL %s", id, facts.OSReleaseVer, eol.Format("2006-01-02"))),
+		}
+	}
+	if status == finding.StatusFail {
+		f.Remediation = finding.Remediation{Description: "Upgrade to a supported release."}
+	}
+	return f
+}
+
+// evaluateEOL classifies a distro release against its known end-of-life date:
+// Fail if past EOL, Warn if within 90 days, Pass otherwise. Returns Unverified
+// when the distro/version isn't in distroEOL. `now` is injected for testability.
+func evaluateEOL(osID, ver string, now time.Time) (finding.Status, string) {
+	id := strings.ToLower(osID)
 	if id == "" {
-		return finding.Finding{Status: finding.StatusUnverified, Message: "could not determine distro"}
+		return finding.StatusUnverified, "could not determine distro"
 	}
 	versions, ok := distroEOL[id]
 	if !ok {
-		return finding.Finding{Status: finding.StatusUnverified, Message: "no EOL data for " + id}
+		return finding.StatusUnverified, "no EOL data for " + id
 	}
-	eol, ok := versions[facts.OSReleaseVer]
+	eol, ok := versions[ver]
 	if !ok {
-		return finding.Finding{Status: finding.StatusUnverified, Message: "no EOL entry for " + id + " " + facts.OSReleaseVer}
+		return finding.StatusUnverified, "no EOL entry for " + id + " " + ver
 	}
-	ev := evidence.Note("os-release", fmt.Sprintf("%s %s, EOL %s", id, facts.OSReleaseVer, eol.Format("2006-01-02")))
-	now := time.Now()
-	if now.After(eol) {
-		return finding.Finding{
-			Status:   finding.StatusFail,
-			Message:  fmt.Sprintf("%s %s is past EOL (%s)", id, facts.OSReleaseVer, eol.Format("2006-01-02")),
-			Evidence: []finding.Evidence{ev},
-			Remediation: finding.Remediation{
-				Description: "Upgrade to a supported release.",
-			},
+	d := eol.Format("2006-01-02")
+	switch {
+	case now.After(eol):
+		return finding.StatusFail, fmt.Sprintf("%s %s is past EOL (%s)", id, ver, d)
+	case eol.Sub(now) < 90*24*time.Hour:
+		return finding.StatusWarn, fmt.Sprintf("%s %s EOL within 90 days (%s)", id, ver, d)
+	default:
+		return finding.StatusPass, fmt.Sprintf("%s %s supported until %s", id, ver, d)
+	}
+}
+
+// countAptUpgrades counts pending upgrades (lines starting "Inst ") in
+// `apt-get -s upgrade` output, and how many of those are security updates.
+func countAptUpgrades(out string) (upgrades, security int) {
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "Inst ") {
+			upgrades++
+			if strings.Contains(line, "-security") || strings.Contains(line, "Debian-Security") {
+				security++
+			}
 		}
 	}
-	if eol.Sub(now) < 90*24*time.Hour {
-		return finding.Finding{
-			Status:   finding.StatusWarn,
-			Message:  fmt.Sprintf("%s %s EOL within 90 days (%s)", id, facts.OSReleaseVer, eol.Format("2006-01-02")),
-			Evidence: []finding.Evidence{ev},
+	return upgrades, security
+}
+
+// countDnfUpdates counts the package lines in `dnf check-update --security`
+// output, ignoring blanks and the "Last metadata" status line.
+func countDnfUpdates(out string) int {
+	count := 0
+	for _, line := range strings.Split(out, "\n") {
+		if line != "" && !strings.HasPrefix(line, "Last metadata") {
+			count++
 		}
 	}
-	return finding.Finding{Status: finding.StatusPass, Message: fmt.Sprintf("%s %s supported until %s", id, facts.OSReleaseVer, eol.Format("2006-01-02")), Evidence: []finding.Evidence{ev}}
+	return count
 }
 
 func init() {

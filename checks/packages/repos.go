@@ -45,16 +45,9 @@ func aptRepoSigning() finding.Finding {
 		if err != nil {
 			return
 		}
-		for i, line := range strings.Split(string(b), "\n") {
-			lower := strings.ToLower(strings.TrimSpace(line))
-			if strings.HasPrefix(lower, "#") || lower == "" {
-				continue
-			}
-			if strings.Contains(lower, "trusted=yes") {
-				bad = append(bad, fmt.Sprintf("%s:%d %s", p, i+1, strings.TrimSpace(line)))
-				evs = append(evs, evidence.FileLine(p, i+1, strings.TrimSpace(line)))
-			}
-		}
+		bb, ee := scanAptTrusted(string(b), p)
+		bad = append(bad, bb...)
+		evs = append(evs, ee...)
 	}
 	for _, r := range roots {
 		st, err := os.Stat(r)
@@ -96,13 +89,9 @@ func dnfRepoSigning() finding.Finding {
 		if err != nil {
 			return nil
 		}
-		for i, line := range strings.Split(string(b), "\n") {
-			low := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(line)), " ", "")
-			if low == "gpgcheck=0" {
-				bad = append(bad, fmt.Sprintf("%s:%d %s", p, i+1, strings.TrimSpace(line)))
-				evs = append(evs, evidence.FileLine(p, i+1, strings.TrimSpace(line)))
-			}
-		}
+		bb, ee := scanDnfGpgcheck(string(b), p)
+		bad = append(bad, bb...)
+		evs = append(evs, ee...)
 		return nil
 	})
 	if len(bad) == 0 {
@@ -116,6 +105,35 @@ func dnfRepoSigning() finding.Finding {
 			Description: "Set gpgcheck=1 and import the repo's GPG key.",
 		},
 	}
+}
+
+// scanAptTrusted returns apt source lines that disable signature verification
+// via `trusted=yes`, skipping blanks and #-comments. `path` labels evidence.
+func scanAptTrusted(content, path string) (bad []string, evs []finding.Evidence) {
+	for i, line := range strings.Split(content, "\n") {
+		lower := strings.ToLower(strings.TrimSpace(line))
+		if strings.HasPrefix(lower, "#") || lower == "" {
+			continue
+		}
+		if strings.Contains(lower, "trusted=yes") {
+			bad = append(bad, fmt.Sprintf("%s:%d %s", path, i+1, strings.TrimSpace(line)))
+			evs = append(evs, evidence.FileLine(path, i+1, strings.TrimSpace(line)))
+		}
+	}
+	return bad, evs
+}
+
+// scanDnfGpgcheck returns dnf/yum repo lines that set `gpgcheck=0` (whitespace
+// around the `=` is tolerated). `path` labels evidence.
+func scanDnfGpgcheck(content, path string) (bad []string, evs []finding.Evidence) {
+	for i, line := range strings.Split(content, "\n") {
+		low := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(line)), " ", "")
+		if low == "gpgcheck=0" {
+			bad = append(bad, fmt.Sprintf("%s:%d %s", path, i+1, strings.TrimSpace(line)))
+			evs = append(evs, evidence.FileLine(path, i+1, strings.TrimSpace(line)))
+		}
+	}
+	return bad, evs
 }
 
 func init() { engine.Register(reposSignedCheck{}) }

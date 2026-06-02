@@ -42,20 +42,28 @@ func (kernelMatchCheck) Run(ctx context.Context, facts sysfacts.Facts) finding.F
 	sort.Strings(installed)
 	newest := installed[len(installed)-1]
 	ev := evidence.Note("kernels", fmt.Sprintf("running=%s\ninstalled=\n  %s", running, strings.Join(installed, "\n  ")))
-	if !strings.HasPrefix(newest, running) && !strings.HasPrefix(running, newest) {
-		// substring match handles distro suffixes like 6.17.0-22-generic vs linux-image-6.17.0-22-generic
-		if !strings.Contains(newest, running) {
-			return finding.Finding{
-				Status:   finding.StatusFail,
-				Message:  "newer kernel installed but not running — reboot pending",
-				Evidence: []finding.Evidence{ev},
-				Remediation: finding.Remediation{
-					Description: "Schedule a reboot to activate the newer kernel.",
-				},
-			}
+	if rebootPending(running, newest) {
+		return finding.Finding{
+			Status:   finding.StatusFail,
+			Message:  "newer kernel installed but not running — reboot pending",
+			Evidence: []finding.Evidence{ev},
+			Remediation: finding.Remediation{
+				Description: "Schedule a reboot to activate the newer kernel.",
+			},
 		}
 	}
 	return finding.Finding{Status: finding.StatusPass, Message: "running kernel is newest installed", Evidence: []finding.Evidence{ev}}
+}
+
+// rebootPending reports whether the newest installed kernel differs from the
+// running one. The prefix/substring checks tolerate packaging suffixes, e.g.
+// running "6.17.0-22-generic" vs installed "6.17.0-22-generic" (prefix) or a
+// package-name-wrapped form that contains the running release as a substring.
+func rebootPending(running, newest string) bool {
+	if strings.HasPrefix(newest, running) || strings.HasPrefix(running, newest) {
+		return false
+	}
+	return !strings.Contains(newest, running)
 }
 
 func installedKernels(mgr string) []string {

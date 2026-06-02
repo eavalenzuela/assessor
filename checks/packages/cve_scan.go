@@ -172,14 +172,19 @@ func pacmanPackages() ([]cve.Package, error) {
 	if err != nil {
 		return nil, err
 	}
+	return parsePacman(string(out)), nil
+}
+
+// parsePacman parses `pacman -Q` output ("name version" per line) into packages.
+func parsePacman(out string) []cve.Package {
 	var pkgs []cve.Package
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) >= 2 {
 			pkgs = append(pkgs, cve.Package{Ecosystem: "Arch", Name: fields[0], Version: fields[1]})
 		}
 	}
-	return pkgs, nil
+	return pkgs
 }
 
 func apkPackages() ([]cve.Package, error) {
@@ -187,8 +192,14 @@ func apkPackages() ([]cve.Package, error) {
 	if err != nil {
 		return nil, err
 	}
+	return parseApk(string(out)), nil
+}
+
+// parseApk parses `apk info -vv` output. Each line is "<name>-<version> - <desc>";
+// name/version split is the last hyphen before the " - " description.
+func parseApk(out string) []cve.Package {
 	var pkgs []cve.Package
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
 		name, _, ok := strings.Cut(line, " - ")
 		if !ok {
 			continue
@@ -199,7 +210,7 @@ func apkPackages() ([]cve.Package, error) {
 		}
 		pkgs = append(pkgs, cve.Package{Ecosystem: "Alpine", Name: name[:idx], Version: name[idx+1:]})
 	}
-	return pkgs, nil
+	return pkgs
 }
 
 func parseTabbed(s, eco string) []cve.Package {
