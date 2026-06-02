@@ -45,36 +45,9 @@ func (weakKeysCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Finding 
 			if err != nil {
 				return nil
 			}
-			for {
-				blk, rest := pem.Decode(b)
-				if blk == nil {
-					break
-				}
-				b = rest
-				switch blk.Type {
-				case "CERTIFICATE":
-					c, err := x509.ParseCertificate(blk.Bytes)
-					if err != nil {
-						continue
-					}
-					if k, ok := c.PublicKey.(*rsa.PublicKey); ok && k.N.BitLen() < 2048 {
-						bad = append(bad, fmt.Sprintf("%s: cert %s RSA %d", p, c.Subject.CommonName, k.N.BitLen()))
-						evs = append(evs, evidence.Note(p, fmt.Sprintf("RSA %d", k.N.BitLen())))
-					}
-					if c.SignatureAlgorithm == x509.MD5WithRSA || c.SignatureAlgorithm == x509.SHA1WithRSA {
-						bad = append(bad, fmt.Sprintf("%s: weak sig %s", p, c.SignatureAlgorithm))
-					}
-				case "RSA PRIVATE KEY":
-					k, err := x509.ParsePKCS1PrivateKey(blk.Bytes)
-					if err != nil {
-						continue
-					}
-					if k.N.BitLen() < 2048 {
-						bad = append(bad, fmt.Sprintf("%s: RSA private %d bits", p, k.N.BitLen()))
-						evs = append(evs, evidence.Note(p, fmt.Sprintf("RSA private %d", k.N.BitLen())))
-					}
-				}
-			}
+			fb, fe := scanWeakKeys(b, p)
+			bad = append(bad, fb...)
+			evs = append(evs, fe...)
 			return nil
 		})
 	}
@@ -89,6 +62,43 @@ func (weakKeysCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Finding 
 			Description: "Reissue affected certs/keys with RSA >= 2048 (or ECDSA P-256+) and SHA-256+.",
 		},
 	}
+}
+
+// scanWeakKeys decodes PEM data and flags weak crypto: RSA public keys (in
+// certificates) or RSA private keys smaller than 2048 bits, and certificates
+// signed with MD5 or SHA-1. `path` labels the output.
+func scanWeakKeys(data []byte, path string) (bad []string, evs []finding.Evidence) {
+	for {
+		blk, rest := pem.Decode(data)
+		if blk == nil {
+			break
+		}
+		data = rest
+		switch blk.Type {
+		case "CERTIFICATE":
+			c, err := x509.ParseCertificate(blk.Bytes)
+			if err != nil {
+				continue
+			}
+			if k, ok := c.PublicKey.(*rsa.PublicKey); ok && k.N.BitLen() < 2048 {
+				bad = append(bad, fmt.Sprintf("%s: cert %s RSA %d", path, c.Subject.CommonName, k.N.BitLen()))
+				evs = append(evs, evidence.Note(path, fmt.Sprintf("RSA %d", k.N.BitLen())))
+			}
+			if c.SignatureAlgorithm == x509.MD5WithRSA || c.SignatureAlgorithm == x509.SHA1WithRSA {
+				bad = append(bad, fmt.Sprintf("%s: weak sig %s", path, c.SignatureAlgorithm))
+			}
+		case "RSA PRIVATE KEY":
+			k, err := x509.ParsePKCS1PrivateKey(blk.Bytes)
+			if err != nil {
+				continue
+			}
+			if k.N.BitLen() < 2048 {
+				bad = append(bad, fmt.Sprintf("%s: RSA private %d bits", path, k.N.BitLen()))
+				evs = append(evs, evidence.Note(path, fmt.Sprintf("RSA private %d", k.N.BitLen())))
+			}
+		}
+	}
+	return bad, evs
 }
 
 func init() { engine.Register(weakKeysCheck{}) }

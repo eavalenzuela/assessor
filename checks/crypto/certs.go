@@ -34,7 +34,6 @@ func (certExpiryCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Findin
 	var bad []string
 	var evs []finding.Evidence
 	now := time.Now()
-	soon := now.Add(30 * 24 * time.Hour)
 	for _, root := range roots {
 		filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 			if err != nil || d.IsDir() {
@@ -47,27 +46,9 @@ func (certExpiryCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Findin
 			if err != nil {
 				return nil
 			}
-			for {
-				blk, rest := pem.Decode(b)
-				if blk == nil {
-					break
-				}
-				b = rest
-				if blk.Type != "CERTIFICATE" {
-					continue
-				}
-				c, err := x509.ParseCertificate(blk.Bytes)
-				if err != nil {
-					continue
-				}
-				if now.After(c.NotAfter) {
-					bad = append(bad, fmt.Sprintf("EXPIRED %s (%s) on %s", c.Subject.CommonName, c.NotAfter.Format("2006-01-02"), p))
-					evs = append(evs, evidence.Note(p, "expired: "+c.Subject.CommonName))
-				} else if c.NotAfter.Before(soon) {
-					bad = append(bad, fmt.Sprintf("expiring %s (%s) on %s", c.Subject.CommonName, c.NotAfter.Format("2006-01-02"), p))
-					evs = append(evs, evidence.Note(p, "near expiry: "+c.Subject.CommonName))
-				}
-			}
+			fb, fe := scanCertExpiry(b, p, now)
+			bad = append(bad, fb...)
+			evs = append(evs, fe...)
 			return nil
 		})
 	}
@@ -82,6 +63,36 @@ func (certExpiryCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Findin
 			Description: "Renew or remove expired certificates.",
 		},
 	}
+}
+
+// scanCertExpiry decodes every CERTIFICATE block in PEM data and flags those
+// already expired (relative to `now`) or expiring within 30 days. Non-cert
+// blocks and unparseable certs are skipped. `path` labels the output.
+func scanCertExpiry(data []byte, path string, now time.Time) (bad []string, evs []finding.Evidence) {
+	soon := now.Add(30 * 24 * time.Hour)
+	for {
+		blk, rest := pem.Decode(data)
+		if blk == nil {
+			break
+		}
+		data = rest
+		if blk.Type != "CERTIFICATE" {
+			continue
+		}
+		c, err := x509.ParseCertificate(blk.Bytes)
+		if err != nil {
+			continue
+		}
+		switch {
+		case now.After(c.NotAfter):
+			bad = append(bad, fmt.Sprintf("EXPIRED %s (%s) on %s", c.Subject.CommonName, c.NotAfter.Format("2006-01-02"), path))
+			evs = append(evs, evidence.Note(path, "expired: "+c.Subject.CommonName))
+		case c.NotAfter.Before(soon):
+			bad = append(bad, fmt.Sprintf("expiring %s (%s) on %s", c.Subject.CommonName, c.NotAfter.Format("2006-01-02"), path))
+			evs = append(evs, evidence.Note(path, "near expiry: "+c.Subject.CommonName))
+		}
+	}
+	return bad, evs
 }
 
 func init() { engine.Register(certExpiryCheck{}) }

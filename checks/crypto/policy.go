@@ -33,24 +33,25 @@ func (cryptoPolicyCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Find
 	}
 	policy := strings.TrimSpace(string(out))
 	ev := evidence.Note("update-crypto-policies --show", policy)
+	status, msg := classifyCryptoPolicy(policy)
+	f := finding.Finding{Status: status, Message: msg, Evidence: []finding.Evidence{ev}}
+	if status == finding.StatusFail {
+		f.Remediation = finding.Remediation{Commands: []string{"update-crypto-policies --set DEFAULT"}}
+	}
+	return f
+}
+
+// classifyCryptoPolicy maps an update-crypto-policies value to a verdict:
+// LEGACY fails (weak algorithms allowed), the known-good DEFAULT/FUTURE/FIPS
+// pass, and anything else is a Warn (custom policy needing manual review).
+func classifyCryptoPolicy(policy string) (finding.Status, string) {
 	switch policy {
 	case "LEGACY":
-		return finding.Finding{
-			Status:   finding.StatusFail,
-			Message:  "crypto policy = LEGACY (allows weak algorithms)",
-			Evidence: []finding.Evidence{ev},
-			Remediation: finding.Remediation{
-				Commands: []string{"update-crypto-policies --set DEFAULT"},
-			},
-		}
+		return finding.StatusFail, "crypto policy = LEGACY (allows weak algorithms)"
 	case "DEFAULT", "FUTURE", "FIPS":
-		return finding.Finding{Status: finding.StatusPass, Message: "policy=" + policy, Evidence: []finding.Evidence{ev}}
+		return finding.StatusPass, "policy=" + policy
 	default:
-		return finding.Finding{
-			Status:   finding.StatusWarn,
-			Message:  "custom policy: " + policy,
-			Evidence: []finding.Evidence{ev},
-		}
+		return finding.StatusWarn, "custom policy: " + policy
 	}
 }
 
