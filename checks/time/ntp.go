@@ -28,7 +28,7 @@ func (ntpSyncedCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Finding
 	// Try timedatectl first (covers chrony, systemd-timesyncd, ntpd via the bus).
 	if out, err := exec.Command("timedatectl", "show").Output(); err == nil {
 		ev := evidence.Note("timedatectl show", string(out))
-		if strings.Contains(string(out), "NTPSynchronized=yes") {
+		if timedatectlSynced(string(out)) {
 			return finding.Finding{Status: finding.StatusPass, Message: "clock synchronized", Evidence: []finding.Evidence{ev}}
 		}
 		return finding.Finding{
@@ -43,12 +43,24 @@ func (ntpSyncedCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Finding
 	}
 	if _, err := exec.LookPath("chronyc"); err == nil {
 		ev, _ := evidence.Command("chronyc", "tracking")
-		if strings.Contains(ev.Content, "Leap status") && !strings.Contains(ev.Content, "Not synchronised") {
+		if chronySynced(ev.Content) {
 			return finding.Finding{Status: finding.StatusPass, Message: "chrony synced", Evidence: []finding.Evidence{ev}}
 		}
 		return finding.Finding{Status: finding.StatusFail, Message: "chrony not synced", Evidence: []finding.Evidence{ev}}
 	}
 	return finding.Finding{Status: finding.StatusUnverified, Message: "no time client tooling available"}
+}
+
+// timedatectlSynced reports whether `timedatectl show` indicates the clock is
+// NTP-synchronized.
+func timedatectlSynced(out string) bool {
+	return strings.Contains(out, "NTPSynchronized=yes")
+}
+
+// chronySynced reports whether `chronyc tracking` output shows a synchronized
+// clock: it reports a Leap status and is not "Not synchronised".
+func chronySynced(content string) bool {
+	return strings.Contains(content, "Leap status") && !strings.Contains(content, "Not synchronised")
 }
 
 type timezoneCheck struct{}
@@ -68,10 +80,17 @@ func (timezoneCheck) Run(ctx context.Context, _ sysfacts.Facts) finding.Finding 
 		return finding.Finding{Status: finding.StatusWarn, Message: "/etc/localtime is not a symlink"}
 	}
 	ev := evidence.Note("/etc/localtime -> ", target)
+	status, msg := classifyTimezone(target)
+	return finding.Finding{Status: status, Message: msg, Evidence: []finding.Evidence{ev}}
+}
+
+// classifyTimezone decides whether the /etc/localtime symlink target is a real
+// configured zone: an empty or "Factory" target fails, anything else passes.
+func classifyTimezone(target string) (finding.Status, string) {
 	if strings.Contains(target, "Factory") || target == "" {
-		return finding.Finding{Status: finding.StatusFail, Message: "timezone not configured (factory default)", Evidence: []finding.Evidence{ev}}
+		return finding.StatusFail, "timezone not configured (factory default)"
 	}
-	return finding.Finding{Status: finding.StatusPass, Message: "timezone: " + target, Evidence: []finding.Evidence{ev}}
+	return finding.StatusPass, "timezone: " + target
 }
 
 func init() {
